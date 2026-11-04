@@ -8,7 +8,7 @@
 //!
 //! The public surface is deliberately minimal:
 //!
-//! - [`CscPattern`] — borrowed, full-symmetric, 0-based, `i32`-indexed.
+//! - [`CscPattern`] — borrowed, full-symmetric, 0-based, `Idx`-indexed.
 //! - [`OrderingStats`] — producer-agnostic diagnostic counters.
 //! - [`OrderingError`] — shared error shape.
 //! - [`CONTRACT_VERSION`] — bumped on any breaking change.
@@ -21,7 +21,7 @@
 //!     pattern: &feral_ordering_core::CscPattern<'_>,
 //!     opts: &XxxOptions,
 //! ) -> Result<
-//!     (Vec<i32>, feral_ordering_core::OrderingStats, XxxStats),
+//!     (Vec<Idx>, feral_ordering_core::OrderingStats, XxxStats),
 //!     feral_ordering_core::OrderingError,
 //! >;
 //! ```
@@ -45,6 +45,14 @@ use core::fmt;
 /// target the same contract version.
 pub const CONTRACT_VERSION: u32 = 1;
 
+/// Signed index type of every pattern, permutation and workspace array.
+///
+/// Upstream uses `i32`; this copy is widened to `i64` so a graph is
+/// bounded by memory rather than by 2^31 vertices or entries. Indices
+/// stay signed because `-1` sentinels and AMD's `FLIP` encoding rely
+/// on it.
+pub type Idx = i64;
+
 /// Borrowed symmetric sparsity pattern in CSC form.
 ///
 /// The pattern must be **full-symmetric** — both the upper and lower
@@ -66,9 +74,9 @@ pub struct CscPattern<'a> {
     /// Matrix dimension.
     pub n: usize,
     /// Column pointers. Length `n + 1`.
-    pub col_ptr: &'a [i32],
+    pub col_ptr: &'a [Idx],
     /// Row indices. Length `col_ptr[n]`.
-    pub row_idx: &'a [i32],
+    pub row_idx: &'a [Idx],
 }
 
 impl<'a> CscPattern<'a> {
@@ -76,7 +84,7 @@ impl<'a> CscPattern<'a> {
     ///
     /// Returns `None` if the structural invariants above are
     /// violated. Does not check symmetry.
-    pub fn new(n: usize, col_ptr: &'a [i32], row_idx: &'a [i32]) -> Option<Self> {
+    pub fn new(n: usize, col_ptr: &'a [Idx], row_idx: &'a [Idx]) -> Option<Self> {
         if col_ptr.len() != n + 1 {
             return None;
         }
@@ -96,7 +104,7 @@ impl<'a> CscPattern<'a> {
                 return None;
             }
         }
-        let n_i32: i32 = match i32::try_from(n) {
+        let n_i32: Idx = match Idx::try_from(n) {
             Ok(v) => v,
             Err(_) => return None,
         };
@@ -165,7 +173,7 @@ pub enum OrderingError {
     /// detection; release builds trust the caller.
     NonSymmetric,
     /// Index overflow in the crate's internal workspace (for
-    /// example, `i32` overflow on a very large matrix).
+    /// example, `Idx` overflow on a very large matrix).
     IndexOverflow,
     /// Graph is disconnected and the crate does not handle
     /// disconnected components in its current form.
@@ -182,7 +190,7 @@ impl fmt::Display for OrderingError {
             Self::NonSymmetric => {
                 f.write_str("ordering input pattern was not structurally symmetric")
             }
-            Self::IndexOverflow => f.write_str("ordering workspace exceeded i32::MAX"),
+            Self::IndexOverflow => f.write_str("ordering workspace exceeded the index range"),
             Self::DisconnectedGraph => f.write_str("ordering input graph is disconnected"),
             Self::Internal(msg) => write!(f, "ordering internal error: {msg}"),
         }
@@ -202,8 +210,8 @@ mod tests {
 
     #[test]
     fn empty_pattern_ok() {
-        let cp = [0i32];
-        let ri: [i32; 0] = [];
+        let cp = [0 as Idx];
+        let ri: [Idx; 0] = [];
         let p = CscPattern::new(0, &cp, &ri).expect("n=0 pattern");
         assert_eq!(p.n, 0);
         assert_eq!(p.nnz(), 0);
@@ -211,51 +219,51 @@ mod tests {
 
     #[test]
     fn diagonal_2x2_ok() {
-        let cp = [0i32, 1, 2];
-        let ri = [0i32, 1];
+        let cp = [0 as Idx, 1, 2];
+        let ri = [0 as Idx, 1];
         let p = CscPattern::new(2, &cp, &ri).unwrap();
         assert_eq!(p.nnz(), 2);
     }
 
     #[test]
     fn rejects_bad_col_ptr_length() {
-        let cp = [0i32, 1];
-        let ri = [0i32];
+        let cp = [0 as Idx, 1];
+        let ri = [0 as Idx];
         assert!(CscPattern::new(2, &cp, &ri).is_none());
     }
 
     #[test]
     fn rejects_oob_row_index() {
-        let cp = [0i32, 1];
-        let ri = [5i32];
+        let cp = [0 as Idx, 1];
+        let ri = [5 as Idx];
         assert!(CscPattern::new(1, &cp, &ri).is_none());
     }
 
     #[test]
     fn rejects_negative_row_index() {
-        let cp = [0i32, 1];
-        let ri = [-1i32];
+        let cp = [0 as Idx, 1];
+        let ri = [-1 as Idx];
         assert!(CscPattern::new(1, &cp, &ri).is_none());
     }
 
     #[test]
     fn rejects_nonzero_first_col_ptr() {
-        let cp = [1i32, 2];
-        let ri = [0i32];
+        let cp = [1 as Idx, 2];
+        let ri = [0 as Idx];
         assert!(CscPattern::new(1, &cp, &ri).is_none());
     }
 
     #[test]
     fn rejects_nonmonotone_col_ptr() {
-        let cp = [0i32, 2, 1];
-        let ri = [0i32, 0];
+        let cp = [0 as Idx, 2, 1];
+        let ri = [0 as Idx, 0];
         assert!(CscPattern::new(2, &cp, &ri).is_none());
     }
 
     #[test]
     fn rejects_row_idx_length_mismatch() {
-        let cp = [0i32, 1, 2];
-        let ri = [0i32];
+        let cp = [0 as Idx, 1, 2];
+        let ri = [0 as Idx];
         assert!(CscPattern::new(2, &cp, &ri).is_none());
     }
 
@@ -265,8 +273,8 @@ mod tests {
         // ascending-order invariant. `new` must reject it: feral-metis's
         // adjacency builder dedups only *adjacent* duplicates, so unsorted
         // rows would let a non-adjacent duplicate survive as a spurious edge.
-        let cp = [0i32, 2, 2];
-        let ri = [1i32, 0];
+        let cp = [0 as Idx, 2, 2];
+        let ri = [1 as Idx, 0];
         assert!(CscPattern::new(2, &cp, &ri).is_none());
     }
 
@@ -275,16 +283,16 @@ mod tests {
         // Ascending order permits adjacent duplicates; feral-metis drops them
         // in its adjacency builder. `new` enforces sortedness, not
         // strict-increase, so this must still be accepted.
-        let cp = [0i32, 3, 3];
-        let ri = [0i32, 0, 1];
+        let cp = [0 as Idx, 3, 3];
+        let ri = [0 as Idx, 0, 1];
         assert!(CscPattern::new(2, &cp, &ri).is_some());
     }
 
     #[test]
     fn rejects_negative_col_ptr_tail() {
         // col_ptr.last() is negative → nnz would be invalid.
-        let cp = [0i32, -1];
-        let ri: [i32; 0] = [];
+        let cp = [0 as Idx, -1];
+        let ri: [Idx; 0] = [];
         assert!(CscPattern::new(1, &cp, &ri).is_none());
     }
 

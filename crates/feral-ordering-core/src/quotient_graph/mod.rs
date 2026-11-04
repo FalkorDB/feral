@@ -38,6 +38,7 @@ pub use algo::{
 pub use metric::{Metric, MinDegree, MinFill};
 pub use workspace::{clear_flag, flip, Workspace, NONE};
 
+use crate::Idx;
 use crate::{CscPattern, OrderingError};
 
 /// Tunable parameters for the shared quotient-graph workspace.
@@ -74,7 +75,7 @@ pub struct OrderDiagnostics {
     pub ncmpa: u32,
     pub n_mass_elim: u32,
     pub n_supervar_merge: u32,
-    pub ndense: i32,
+    pub ndense: Idx,
     pub flops: StepFlops,
 }
 
@@ -95,7 +96,7 @@ pub fn order<M: Metric>(
     pattern: &CscPattern<'_>,
     opts: &WorkspaceOptions,
     aggressive: bool,
-) -> Result<(Vec<i32>, OrderDiagnostics), OrderingError> {
+) -> Result<(Vec<Idx>, OrderDiagnostics), OrderingError> {
     let n_buckets = M::n_buckets(pattern.n);
     let mut ws = Workspace::new_with_n_buckets(pattern, opts, n_buckets)?;
     let flops = M::run_elimination(&mut ws, aggressive)?;

@@ -26,6 +26,7 @@ pub use stats::AmdStats;
 use feral_ordering_core::quotient_graph::{
     finalize_permutation, order, run_elimination, MinDegree, Workspace, WorkspaceOptions,
 };
+use feral_ordering_core::Idx;
 use std::time::Instant;
 
 /// Tunable parameters for AMD ordering.
@@ -65,7 +66,7 @@ impl Default for AmdOptions {
 /// `P·A·Pᵀ` with `P[k] = perm[k]` produces less fill than the
 /// natural ordering. The input must be the full symmetric pattern
 /// (both halves present).
-pub fn amd_order(pattern: &CscPattern<'_>) -> Result<Vec<i32>, OrderingError> {
+pub fn amd_order(pattern: &CscPattern<'_>) -> Result<Vec<Idx>, OrderingError> {
     amd_order_opts(pattern, &AmdOptions::default()).map(|(perm, _)| perm)
 }
 
@@ -77,7 +78,7 @@ pub fn amd_order(pattern: &CscPattern<'_>) -> Result<Vec<i32>, OrderingError> {
 /// [`amd_order_full`] instead.
 pub fn amd_order_with_stats(
     pattern: &CscPattern<'_>,
-) -> Result<(Vec<i32>, AmdStats), OrderingError> {
+) -> Result<(Vec<Idx>, AmdStats), OrderingError> {
     amd_order_opts(pattern, &AmdOptions::default())
 }
 
@@ -88,7 +89,7 @@ pub fn amd_order_with_stats(
 pub fn amd_order_opts(
     pattern: &CscPattern<'_>,
     opts: &AmdOptions,
-) -> Result<(Vec<i32>, AmdStats), OrderingError> {
+) -> Result<(Vec<Idx>, AmdStats), OrderingError> {
     amd_order_full(pattern, opts).map(|(perm, _, amd_stats)| (perm, amd_stats))
 }
 
@@ -108,7 +109,7 @@ pub fn amd_order_opts(
 pub fn amd_order_full(
     pattern: &CscPattern<'_>,
     opts: &AmdOptions,
-) -> Result<(Vec<i32>, OrderingStats, AmdStats), OrderingError> {
+) -> Result<(Vec<Idx>, OrderingStats, AmdStats), OrderingError> {
     let t0 = Instant::now();
     let ws_opts = WorkspaceOptions {
         dense_alpha: opts.dense_alpha,
@@ -172,7 +173,7 @@ pub struct AmdSubstages {
 pub fn amd_order_substages(
     pattern: &CscPattern<'_>,
     opts: &AmdOptions,
-) -> Result<(Vec<i32>, AmdSubstages), OrderingError> {
+) -> Result<(Vec<Idx>, AmdSubstages), OrderingError> {
     let t = Instant::now();
     let ws_opts = WorkspaceOptions {
         dense_alpha: opts.dense_alpha,

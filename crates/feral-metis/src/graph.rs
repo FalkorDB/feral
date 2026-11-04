@@ -6,16 +6,17 @@
 //! information for fill-reducing ordering and would otherwise need
 //! to be stripped in every downstream kernel.
 //!
-//! Indices are held as `i32` end-to-end: it matches the crate
+//! Indices are held as `Idx` end-to-end: it matches the crate
 //! contract, the METIS reference, and keeps cache density high for
 //! the partitioning kernels without touching `usize`-shaped
 //! `Vec<T>` storage.
 
+use feral_ordering_core::Idx;
 use feral_ordering_core::{CscPattern, OrderingError};
 
 /// CSR graph for partitioning.
 ///
-/// All arrays are `i32`-indexed. Adjacency lists are **not**
+/// All arrays are `Idx`-indexed. Adjacency lists are **not**
 /// guaranteed sorted: METIS's kernels don't require sortedness, and
 /// enforcing it would be a constant-factor cost in every coarsening
 /// level. `from_csc_pattern` happens to emit them sorted because it
@@ -23,19 +24,19 @@ use feral_ordering_core::{CscPattern, OrderingError};
 /// on this after coarsening.
 #[derive(Debug, Clone)]
 pub struct Graph {
-    /// Number of vertices. Must equal `xadj.len() - 1` and fit in `i32`.
-    pub nvtxs: i32,
+    /// Number of vertices. Must equal `xadj.len() - 1` and fit in `Idx`.
+    pub nvtxs: Idx,
     /// Adjacency offsets, length `nvtxs + 1`. `xadj[0] == 0`,
     /// non-decreasing. `xadj[nvtxs]` equals `adjncy.len()` and
     /// therefore `2 * |E|` for undirected graphs without self-loops.
-    pub xadj: Vec<i32>,
+    pub xadj: Vec<Idx>,
     /// Neighbor lists, length `2 * |E|`. Each undirected edge `{u,v}`
     /// appears twice (once in `u`'s list, once in `v`'s).
-    pub adjncy: Vec<i32>,
+    pub adjncy: Vec<Idx>,
     /// Vertex weights, length `nvtxs`. Default: all 1.
-    pub vwgt: Vec<i32>,
+    pub vwgt: Vec<Idx>,
     /// Edge weights, aligned with `adjncy`. Default: all 1.
-    pub adjwgt: Vec<i32>,
+    pub adjwgt: Vec<Idx>,
 }
 
 impl Graph {
@@ -51,12 +52,12 @@ impl Graph {
     /// Complexity: `O(nnz)` time, `O(nnz + n)` space.
     pub fn from_csc_pattern(pattern: &CscPattern<'_>) -> Result<Self, OrderingError> {
         let n = pattern.n;
-        if n > i32::MAX as usize {
+        if n > Idx::MAX as usize {
             return Err(OrderingError::IndexOverflow);
         }
-        let nvtxs = n as i32;
-        let mut xadj: Vec<i32> = Vec::with_capacity(n + 1);
-        let mut adjncy: Vec<i32> = Vec::with_capacity(pattern.row_idx.len());
+        let nvtxs = n as Idx;
+        let mut xadj: Vec<Idx> = Vec::with_capacity(n + 1);
+        let mut adjncy: Vec<Idx> = Vec::with_capacity(pattern.row_idx.len());
         xadj.push(0);
         for j in 0..n {
             let lo = pattern.col_ptr[j] as usize;
@@ -64,8 +65,8 @@ impl Graph {
             if hi > pattern.row_idx.len() || lo > hi {
                 return Err(OrderingError::MalformedInput);
             }
-            let jj = j as i32;
-            let mut last: i32 = -1;
+            let jj = j as Idx;
+            let mut last: Idx = -1;
             for &r in &pattern.row_idx[lo..hi] {
                 if r == jj {
                     // drop diagonal
@@ -82,13 +83,13 @@ impl Graph {
                 adjncy.push(r);
                 last = r;
             }
-            if adjncy.len() > i32::MAX as usize {
+            if adjncy.len() > Idx::MAX as usize {
                 return Err(OrderingError::IndexOverflow);
             }
-            xadj.push(adjncy.len() as i32);
+            xadj.push(adjncy.len() as Idx);
         }
-        let vwgt = vec![1i32; n];
-        let adjwgt = vec![1i32; adjncy.len()];
+        let vwgt = vec![1 as Idx; n];
+        let adjwgt = vec![1 as Idx; adjncy.len()];
         Ok(Graph {
             nvtxs,
             xadj,
@@ -104,19 +105,19 @@ impl Graph {
     }
 
     /// Degree of vertex `v`.
-    pub fn degree(&self, v: i32) -> i32 {
+    pub fn degree(&self, v: Idx) -> Idx {
         self.xadj[(v + 1) as usize] - self.xadj[v as usize]
     }
 
     /// Borrow the adjacency slice of vertex `v`.
-    pub fn neighbors(&self, v: i32) -> &[i32] {
+    pub fn neighbors(&self, v: Idx) -> &[Idx] {
         let lo = self.xadj[v as usize] as usize;
         let hi = self.xadj[(v + 1) as usize] as usize;
         &self.adjncy[lo..hi]
     }
 
     /// Borrow the edge-weight slice aligned with [`Self::neighbors`].
-    pub fn edge_weights(&self, v: i32) -> &[i32] {
+    pub fn edge_weights(&self, v: Idx) -> &[Idx] {
         let lo = self.xadj[v as usize] as usize;
         let hi = self.xadj[(v + 1) as usize] as usize;
         &self.adjwgt[lo..hi]
@@ -130,32 +131,32 @@ mod tests {
 
     // -- small pattern generators (full symmetric, diagonal included) --
 
-    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>) {
+    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<Idx>, Vec<Idx>) {
         let mut set: BTreeSet<(usize, usize)> = BTreeSet::new();
         for &(i, j) in triples {
             set.insert((i, j));
             set.insert((j, i));
         }
-        let mut cols: Vec<Vec<i32>> = vec![Vec::new(); n];
+        let mut cols: Vec<Vec<Idx>> = vec![Vec::new(); n];
         for &(r, c) in &set {
-            cols[c].push(r as i32);
+            cols[c].push(r as Idx);
         }
         for col in &mut cols {
             col.sort();
         }
-        let mut col_ptr: Vec<i32> = Vec::with_capacity(n + 1);
+        let mut col_ptr: Vec<Idx> = Vec::with_capacity(n + 1);
         col_ptr.push(0);
-        let mut row_idx: Vec<i32> = Vec::new();
+        let mut row_idx: Vec<Idx> = Vec::new();
         for col in &cols {
             for &r in col {
                 row_idx.push(r);
             }
-            col_ptr.push(row_idx.len() as i32);
+            col_ptr.push(row_idx.len() as Idx);
         }
         (col_ptr, row_idx)
     }
 
-    fn diag(n: usize) -> (Vec<i32>, Vec<i32>) {
+    fn diag(n: usize) -> (Vec<Idx>, Vec<Idx>) {
         let mut t = Vec::new();
         for i in 0..n {
             t.push((i, i));
@@ -163,7 +164,7 @@ mod tests {
         csc_from_triples(n, &t)
     }
 
-    fn arrow(n: usize) -> (Vec<i32>, Vec<i32>) {
+    fn arrow(n: usize) -> (Vec<Idx>, Vec<Idx>) {
         let mut t = Vec::new();
         for i in 0..n {
             t.push((i, i));
@@ -174,7 +175,7 @@ mod tests {
         csc_from_triples(n, &t)
     }
 
-    fn tridiag(n: usize) -> (Vec<i32>, Vec<i32>) {
+    fn tridiag(n: usize) -> (Vec<Idx>, Vec<Idx>) {
         let mut t = Vec::new();
         for i in 0..n {
             t.push((i, i));
@@ -185,7 +186,7 @@ mod tests {
         csc_from_triples(n, &t)
     }
 
-    fn grid_2d(m: usize, n: usize) -> (Vec<i32>, Vec<i32>) {
+    fn grid_2d(m: usize, n: usize) -> (Vec<Idx>, Vec<Idx>) {
         let idx = |r: usize, c: usize| r * n + c;
         let total = m * n;
         let mut t = Vec::new();
@@ -272,7 +273,7 @@ mod tests {
             assert_eq!(g.degree(v), 1);
             assert_eq!(g.neighbors(v), &[0]);
         }
-        let mut hub: Vec<i32> = g.neighbors(0).to_vec();
+        let mut hub: Vec<Idx> = g.neighbors(0).to_vec();
         hub.sort();
         assert_eq!(hub, vec![1, 2, 3, 4]);
     }
@@ -323,8 +324,8 @@ mod tests {
     #[test]
     fn empty_graph_is_legal() {
         // n=0: no columns. Graph has zero vertices and zero edges.
-        let cp: Vec<i32> = vec![0];
-        let ri: Vec<i32> = vec![];
+        let cp: Vec<Idx> = vec![0];
+        let ri: Vec<Idx> = vec![];
         let pat = CscPattern::new(0, &cp, &ri).unwrap();
         let g = Graph::from_csc_pattern(&pat).unwrap();
         assert_eq!(g.nvtxs, 0);

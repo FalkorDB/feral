@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn shuffle_is_permutation() {
-        let mut v: Vec<i32> = (0..100).collect();
+        let mut v: Vec<feral_ordering_core::Idx> = (0..100).collect();
         let mut rng = SplitMix::new(7);
         rng.shuffle(&mut v);
         let mut sorted = v.clone();

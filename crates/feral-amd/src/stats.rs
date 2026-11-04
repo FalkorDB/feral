@@ -14,7 +14,7 @@ pub struct AmdStats {
     ///
     /// Currently always `0`: not wired to a backing counter. The reset
     /// it would count (`clear_flag`) only fires when the generation
-    /// counter `wflg` reaches `wbig = i32::MAX - n`, which during
+    /// counter `wflg` reaches `wbig = Idx::MAX - n`, which during
     /// elimination requires `n` on the order of tens of thousands, so
     /// the true count is `0` on every practically testable input.
     pub n_clear_flag: u32,

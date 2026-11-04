@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 /// Build a full-symmetric CSC pattern from an `(i, j)` triple list
 /// (lower OR upper triangle, both directions are inserted, plus the
 /// diagonal). Row indices within each column are sorted ascending.
-fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>) {
+fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i64>, Vec<i64>) {
     let mut set: BTreeSet<(usize, usize)> = BTreeSet::new();
     for i in 0..n {
         set.insert((i, i));
@@ -33,25 +33,25 @@ fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>
         set.insert((i, j));
         set.insert((j, i));
     }
-    let mut cols: Vec<Vec<i32>> = vec![Vec::new(); n];
+    let mut cols: Vec<Vec<i64>> = vec![Vec::new(); n];
     for &(r, c) in &set {
-        cols[c].push(r as i32);
+        cols[c].push(r as i64);
     }
     for col in &mut cols {
         col.sort();
     }
-    let mut col_ptr: Vec<i32> = vec![0];
-    let mut row_idx: Vec<i32> = Vec::new();
+    let mut col_ptr: Vec<i64> = vec![0];
+    let mut row_idx: Vec<i64> = Vec::new();
     for col in &cols {
         for &r in col {
             row_idx.push(r);
         }
-        col_ptr.push(row_idx.len() as i32);
+        col_ptr.push(row_idx.len() as i64);
     }
     (col_ptr, row_idx)
 }
 
-fn assert_is_permutation(perm: &[i32], n: usize) {
+fn assert_is_permutation(perm: &[i64], n: usize) {
     assert_eq!(perm.len(), n, "perm has wrong length");
     let mut seen = vec![false; n];
     for &p in perm {

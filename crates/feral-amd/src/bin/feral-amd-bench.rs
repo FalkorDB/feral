@@ -7,42 +7,42 @@ use std::time::Instant;
 
 use feral_amd::{amd_order_with_stats, CscPattern};
 
-fn arrow(n: usize) -> (Vec<i32>, Vec<i32>) {
-    let mut cp: Vec<i32> = vec![0];
-    let mut ri: Vec<i32> = Vec::new();
+fn arrow(n: usize) -> (Vec<i64>, Vec<i64>) {
+    let mut cp: Vec<i64> = vec![0];
+    let mut ri: Vec<i64> = Vec::new();
     ri.push(0);
     for r in 1..n {
-        ri.push(r as i32);
+        ri.push(r as i64);
     }
-    cp.push(ri.len() as i32);
+    cp.push(ri.len() as i64);
     for j in 1..n {
         ri.push(0);
-        ri.push(j as i32);
-        cp.push(ri.len() as i32);
+        ri.push(j as i64);
+        cp.push(ri.len() as i64);
     }
     (cp, ri)
 }
 
-fn band(n: usize, b: usize) -> (Vec<i32>, Vec<i32>) {
-    let mut cp: Vec<i32> = vec![0];
-    let mut ri: Vec<i32> = Vec::new();
+fn band(n: usize, b: usize) -> (Vec<i64>, Vec<i64>) {
+    let mut cp: Vec<i64> = vec![0];
+    let mut ri: Vec<i64> = Vec::new();
     for j in 0..n {
         let lo = j.saturating_sub(b);
         let hi = (j + b + 1).min(n);
         for r in lo..hi {
-            ri.push(r as i32);
+            ri.push(r as i64);
         }
-        cp.push(ri.len() as i32);
+        cp.push(ri.len() as i64);
     }
     (cp, ri)
 }
 
-fn grid(m: usize, n: usize) -> (Vec<i32>, Vec<i32>) {
+fn grid(m: usize, n: usize) -> (Vec<i64>, Vec<i64>) {
     use std::collections::BTreeSet;
     let total = m * n;
     let idx = |r: usize, c: usize| r * n + c;
-    let mut cp: Vec<i32> = vec![0];
-    let mut ri: Vec<i32> = Vec::new();
+    let mut cp: Vec<i64> = vec![0];
+    let mut ri: Vec<i64> = Vec::new();
     for c in 0..total {
         let r0 = c / n;
         let c0 = c % n;
@@ -61,14 +61,14 @@ fn grid(m: usize, n: usize) -> (Vec<i32>, Vec<i32>) {
             neigh.insert(idx(r0, c0 + 1));
         }
         for &r in &neigh {
-            ri.push(r as i32);
+            ri.push(r as i64);
         }
-        cp.push(ri.len() as i32);
+        cp.push(ri.len() as i64);
     }
     (cp, ri)
 }
 
-fn run(label: &str, n: usize, cp: &[i32], ri: &[i32]) {
+fn run(label: &str, n: usize, cp: &[i64], ri: &[i64]) {
     let pattern = match CscPattern::new(n, cp, ri) {
         Some(p) => p,
         None => {

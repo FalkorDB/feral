@@ -15,12 +15,13 @@
 
 use crate::graph::Graph;
 use crate::rng::SplitMix;
+use feral_ordering_core::Idx;
 
 pub const PART_A: u8 = 0;
 pub const PART_B: u8 = 1;
 
 /// Compute the edge-cut of a bisection.
-pub fn cut_size(graph: &Graph, labels: &[u8]) -> i32 {
+pub fn cut_size(graph: &Graph, labels: &[u8]) -> Idx {
     debug_assert_eq!(labels.len(), graph.nvtxs as usize);
     let mut cut: i64 = 0;
     for v in 0..graph.nvtxs as usize {
@@ -30,11 +31,11 @@ pub fn cut_size(graph: &Graph, labels: &[u8]) -> i32 {
         for k in lo..hi {
             let u = graph.adjncy[k] as usize;
             if u > v && labels[u] != lv {
-                cut += graph.adjwgt[k] as i64;
+                cut += graph.adjwgt[k];
             }
         }
     }
-    cut.min(i32::MAX as i64) as i32
+    cut as Idx
 }
 
 /// Total vertex weight of part `p`.
@@ -42,7 +43,7 @@ pub fn part_weight(graph: &Graph, labels: &[u8], p: u8) -> i64 {
     let mut s: i64 = 0;
     for (v, &l) in labels.iter().enumerate() {
         if l == p {
-            s += graph.vwgt[v] as i64;
+            s += graph.vwgt[v];
         }
     }
     s
@@ -58,7 +59,7 @@ pub fn initial_bisect_ggp(graph: &Graph, rng: &mut SplitMix, target_a: i64) -> V
     }
     let seed = rng.gen_range(n as u64) as usize;
     labels[seed] = PART_A;
-    let mut a_weight: i64 = graph.vwgt[seed] as i64;
+    let mut a_weight: i64 = graph.vwgt[seed];
 
     // GGP gain of pulling a boundary vertex v (still in B) into A is
     //   (edges to A) - (edges to B),
@@ -72,13 +73,13 @@ pub fn initial_bisect_ggp(graph: &Graph, rng: &mut SplitMix, target_a: i64) -> V
     // No full PQ: pick the max-gain vertex via a linear scan over the
     // boundary set. On coarsest graphs (n <= coarsen_floor = 120) this
     // is fine.
-    let mut gain: Vec<i32> = vec![0; n];
+    let mut gain: Vec<Idx> = vec![0; n];
     let mut in_boundary: Vec<bool> = vec![false; n];
-    let mut boundary: Vec<i32> = Vec::new();
+    let mut boundary: Vec<Idx> = Vec::new();
 
     // Per-vertex total incident edge weight (constant). Turns the
     // edges-to-A accumulator into the true GGP gain in the scan below.
-    let mut wtot: Vec<i32> = vec![0; n];
+    let mut wtot: Vec<Idx> = vec![0; n];
     for (v, wt) in wtot.iter_mut().enumerate() {
         let lo = graph.xadj[v] as usize;
         let hi = graph.xadj[v + 1] as usize;
@@ -92,9 +93,9 @@ pub fn initial_bisect_ggp(graph: &Graph, rng: &mut SplitMix, target_a: i64) -> V
     let push_neighbors = |v: usize,
                           graph: &Graph,
                           labels: &[u8],
-                          gain: &mut [i32],
+                          gain: &mut [Idx],
                           in_boundary: &mut [bool],
-                          boundary: &mut Vec<i32>| {
+                          boundary: &mut Vec<Idx>| {
         let lo = graph.xadj[v] as usize;
         let hi = graph.xadj[v + 1] as usize;
         for k in lo..hi {
@@ -107,7 +108,7 @@ pub fn initial_bisect_ggp(graph: &Graph, rng: &mut SplitMix, target_a: i64) -> V
             gain[u] = gain[u].saturating_add(graph.adjwgt[k]);
             if !in_boundary[u] {
                 in_boundary[u] = true;
-                boundary.push(u as i32);
+                boundary.push(u as Idx);
             }
         }
     };
@@ -143,7 +144,7 @@ pub fn initial_bisect_ggp(graph: &Graph, rng: &mut SplitMix, target_a: i64) -> V
         }
         labels[vu] = PART_A;
         in_boundary[vu] = false;
-        a_weight += graph.vwgt[vu] as i64;
+        a_weight += graph.vwgt[vu];
         // Update neighbors' gains: v was in B, now in A; each
         // B-neighbor u of v sees +adjwgt(v,u) toward A.
         push_neighbors(
@@ -177,7 +178,7 @@ pub fn initial_bisect_bfs(graph: &Graph, rng: &mut SplitMix, target_a: i64) -> V
             break;
         }
         labels[v] = PART_A;
-        a_weight += graph.vwgt[v] as i64;
+        a_weight += graph.vwgt[v];
         let lo = graph.xadj[v] as usize;
         let hi = graph.xadj[v + 1] as usize;
         for k in lo..hi {
@@ -198,26 +199,26 @@ mod tests {
     use feral_ordering_core::CscPattern;
     use std::collections::BTreeSet;
 
-    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>) {
+    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<Idx>, Vec<Idx>) {
         let mut set: BTreeSet<(usize, usize)> = BTreeSet::new();
         for &(i, j) in triples {
             set.insert((i, j));
             set.insert((j, i));
         }
-        let mut cols: Vec<Vec<i32>> = vec![Vec::new(); n];
+        let mut cols: Vec<Vec<Idx>> = vec![Vec::new(); n];
         for &(r, c) in &set {
-            cols[c].push(r as i32);
+            cols[c].push(r as Idx);
         }
         for col in &mut cols {
             col.sort();
         }
-        let mut col_ptr: Vec<i32> = vec![0];
-        let mut row_idx: Vec<i32> = Vec::new();
+        let mut col_ptr: Vec<Idx> = vec![0];
+        let mut row_idx: Vec<Idx> = Vec::new();
         for col in &cols {
             for &r in col {
                 row_idx.push(r);
             }
-            col_ptr.push(row_idx.len() as i32);
+            col_ptr.push(row_idx.len() as Idx);
         }
         (col_ptr, row_idx)
     }
@@ -244,7 +245,7 @@ mod tests {
     }
 
     fn total_weight(graph: &Graph) -> i64 {
-        graph.vwgt.iter().map(|&w| w as i64).sum()
+        graph.vwgt.iter().copied().sum()
     }
 
     #[test]
