@@ -36,24 +36,66 @@ pub(crate) fn nd_order(
     let n = graph.nvtxs as usize;
     let mut iperm: Vec<Idx> = vec![-1; n];
     let mut rng = SplitMix::new(opts.seed);
-
-    // Top-level: walk connected components.
     let (cc_label, ncc) = connected_components(&graph);
     stats.n_components = ncc as u32;
-
-    let mut offset: usize = 0;
-    for c in 0..ncc {
-        let (sub, vtx_map) = extract_by_label(&graph, &cc_label, c as Idx);
-        let count = sub.nvtxs as usize;
-        if count > 0 {
-            recurse(&sub, &vtx_map, offset, &mut iperm, opts, &mut rng, stats)?;
-        }
-        offset += count;
-    }
-    debug_assert_eq!(offset, n);
-
-    // Invert iperm → perm.
+    let identity: Vec<Idx> = (0..n as Idx).collect();
+    split_and_recurse(
+        &graph, &identity, &cc_label, ncc, 0, &mut iperm, opts, &mut rng, stats,
+    )?;
     invert_iperm(&iperm, n)
+}
+
+/// Order the connected components of `graph` (labelled `0..ncc` by
+/// `label`) one after the other, in label order, into
+/// `[offset, offset + n)`. Linear in the size of `graph`: one counting
+/// sort groups the components, and a single-vertex component takes its
+/// position directly.
+#[allow(clippy::too_many_arguments)]
+fn split_and_recurse(
+    graph: &Graph,
+    vtx_map: &[Idx],
+    label: &[Idx],
+    ncc: usize,
+    offset: usize,
+    iperm: &mut [Idx],
+    opts: &MetisOptions,
+    rng: &mut SplitMix,
+    stats: &mut MetisStats,
+) -> Result<(), OrderingError> {
+    let n = graph.nvtxs as usize;
+    // Counting sort by label keeps vertex order inside each component.
+    let mut start = vec![0usize; ncc + 1];
+    for &l in label {
+        start[l as usize + 1] += 1;
+    }
+    for c in 0..ncc {
+        start[c + 1] += start[c];
+    }
+    let mut members = vec![0 as Idx; n];
+    let mut local_id = vec![-1 as Idx; n];
+    let mut fill = start.clone();
+    for v in 0..n {
+        let c = label[v] as usize;
+        local_id[v] = (fill[c] - start[c]) as Idx;
+        members[fill[c]] = v as Idx;
+        fill[c] += 1;
+    }
+    drop(fill);
+    let mut off = offset;
+    for c in 0..ncc {
+        let m = &members[start[c]..start[c + 1]];
+        if m.len() == 1 {
+            iperm[vtx_map[m[0] as usize] as usize] = off as Idx;
+            off += 1;
+            continue;
+        }
+        let sub = build_induced(graph, m, &local_id);
+        let map: Vec<Idx> = m.iter().map(|&v| vtx_map[v as usize]).collect();
+        recurse(&sub, &map, off, iperm, opts, rng, stats)?;
+        off += m.len();
+    }
+    debug_assert_eq!(off, offset + n);
+    Ok(())
 }
 
 fn recurse(
@@ -74,18 +116,11 @@ fn recurse(
         return Ok(());
     }
 
-    // Connected-component split (sub-problem may be disconnected).
     let (cc_label, ncc) = connected_components(subgraph);
     if ncc > 1 {
-        let mut off = offset;
-        for c in 0..ncc {
-            let (sub, map) = extract_by_label(subgraph, &cc_label, c as Idx);
-            let map_to_orig: Vec<Idx> = map.iter().map(|&local| vtx_map[local as usize]).collect();
-            let count = sub.nvtxs as usize;
-            recurse(&sub, &map_to_orig, off, iperm, opts, rng, stats)?;
-            off += count;
-        }
-        return Ok(());
+        return split_and_recurse(
+            subgraph, vtx_map, &cc_label, ncc, offset, iperm, opts, rng, stats,
+        );
     }
 
     // AMD leaf.
@@ -354,21 +389,6 @@ fn connected_components(graph: &Graph) -> (Vec<Idx>, usize) {
         ncc += 1;
     }
     (cc, ncc as usize)
-}
-
-/// Extract the induced subgraph on the vertex set `{v : label[v] == c}`.
-/// Returns the subgraph and the mapping `local_id → original_id`.
-fn extract_by_label(graph: &Graph, label: &[Idx], c: Idx) -> (Graph, Vec<Idx>) {
-    let n = graph.nvtxs as usize;
-    let mut vtx_map: Vec<Idx> = Vec::new();
-    let mut local_id: Vec<Idx> = vec![-1; n];
-    for v in 0..n {
-        if label[v] == c {
-            local_id[v] = vtx_map.len() as Idx;
-            vtx_map.push(v as Idx);
-        }
-    }
-    (build_induced(graph, &vtx_map, &local_id), vtx_map)
 }
 
 /// Extract the induced subgraph on the given list of vertex ids.
