@@ -164,7 +164,18 @@ pub fn coarsen(
 /// 2-hop matching pass: revisit self-matched vertices and pair them
 /// with another self-matched vertex that shares a common neighbor.
 /// Rebuilds `cmap` and returns the new `cnvtxs`.
+///
+/// `first_free[mid]` is where the scan of `mid`'s neighbours resumes:
+/// a vertex once matched stays matched, so the entries before it can
+/// never be a partner again. Without it a hub's adjacency is rescanned
+/// from the start for each of its neighbours, quadratic in its degree
+/// (a star of 200k leaves took 11 s); with it the pass is linear. The
+/// partner chosen is the same.
 fn two_hop_pass(fine: &Graph, match_: &mut [Idx], cmap: &mut [Idx]) -> Idx {
+    let mut first_free: Vec<usize> = fine.xadj[..fine.nvtxs as usize]
+        .iter()
+        .map(|&x| x as usize)
+        .collect();
     for v in 0..fine.nvtxs {
         let vu = v as usize;
         if match_[vu] != v {
@@ -178,8 +189,12 @@ fn two_hop_pass(fine: &Graph, match_: &mut [Idx], cmap: &mut [Idx]) -> Idx {
         let mut partner: Idx = -1;
         'outer: for k in lo..hi {
             let mid = fine.adjncy[k];
-            let mlo = fine.xadj[mid as usize] as usize;
             let mhi = fine.xadj[(mid as usize) + 1] as usize;
+            let mut mlo = first_free[mid as usize];
+            while mlo < mhi && match_[fine.adjncy[mlo] as usize] != fine.adjncy[mlo] {
+                mlo += 1;
+            }
+            first_free[mid as usize] = mlo;
             for &w in &fine.adjncy[mlo..mhi] {
                 if w == v {
                     continue;
