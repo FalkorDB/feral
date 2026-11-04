@@ -32,6 +32,7 @@
 
 use super::algo::{run_elimination as run_elimination_amd, run_elimination_amf, StepFlops};
 use super::workspace::Workspace;
+use crate::Idx;
 use crate::OrderingError;
 
 /// Selection metric for an AMD-family bottom-up ordering.
@@ -44,8 +45,8 @@ use crate::OrderingError;
 /// inner-loop sites are inlined into the concrete `run_elimination_*`
 /// functions in `algo.rs`.
 pub trait Metric {
-    /// Bucket key produced by the selection metric. AMD uses `i32`
-    /// (the running degree); AMF will also use `i32` (quantized RMF).
+    /// Bucket key produced by the selection metric. AMD uses `Idx`
+    /// (the running degree); AMF will also use `Idx` (quantized RMF).
     type Score: Copy + Ord + Default;
 
     /// Length of the bucket head array `Workspace::head`. AMD: `n`
@@ -55,7 +56,7 @@ pub trait Metric {
 
     /// Initial score for a freshly-loaded variable with adjacency
     /// length `len`. AMD and AMF both seed `len`.
-    fn init_score(len: i32) -> Self::Score;
+    fn init_score(len: Idx) -> Self::Score;
 
     /// Bucket index for the given score. AMD: identity. AMF: identity
     /// for `s ≤ n`, coarse-stride above.
@@ -90,7 +91,7 @@ pub trait Metric {
 pub struct MinDegree;
 
 impl Metric for MinDegree {
-    type Score = i32;
+    type Score = Idx;
 
     #[inline(always)]
     fn n_buckets(n: usize) -> usize {
@@ -98,12 +99,12 @@ impl Metric for MinDegree {
     }
 
     #[inline(always)]
-    fn init_score(len: i32) -> i32 {
+    fn init_score(len: Idx) -> Idx {
         len
     }
 
     #[inline(always)]
-    fn bucket(score: i32, _n: usize) -> usize {
+    fn bucket(score: Idx, _n: usize) -> usize {
         score as usize
     }
 
@@ -113,7 +114,7 @@ impl Metric for MinDegree {
     }
 
     #[inline(always)]
-    fn merge_supervariable(_parent: &mut i32, _child: i32) {
+    fn merge_supervariable(_parent: &mut Idx, _child: Idx) {
         // AMD does not maintain a per-supervariable score; degree
         // bookkeeping flows entirely through `nv[i]` and the
         // re-insertion loop's loose-degree formula.
@@ -133,7 +134,7 @@ impl Metric for MinDegree {
 /// final `nnz_L` (see `dev/research/amf-clean-room.md` Section 1).
 ///
 /// Score is a quantized `RMF = DEG*(DEG-1+2*DEGME) - WF(i)` value
-/// stored in `i32`. Buckets up to and including `NORIG = n` are one
+/// stored in `Idx`. Buckets up to and including `NORIG = n` are one
 /// bucket per integer score; above `NORIG` the buckets quantize with
 /// stride `PAS = max(n / 8, 1)` and the head must be linear-scanned
 /// to pick the minimum-RMF entry. Supervariable absorption merges
@@ -148,7 +149,7 @@ impl Metric for MinDegree {
 pub struct MinFill;
 
 impl Metric for MinFill {
-    type Score = i32;
+    type Score = Idx;
 
     /// AMF needs `2 * n + 2` slots: `0..=NORIG` for one-per-score
     /// fine buckets, `NORIG+1..=NBBUCK` (`NBBUCK = 2 * n`) for
@@ -164,7 +165,7 @@ impl Metric for MinFill {
     /// length `len(i)`. Same seeding as AMD; the AMF metric only
     /// diverges once the elimination loop starts producing elements.
     #[inline(always)]
-    fn init_score(len: i32) -> i32 {
+    fn init_score(len: Idx) -> Idx {
         len
     }
 
@@ -179,7 +180,7 @@ impl Metric for MinFill {
     /// Reference: `ana_orderings.F:4954-5017` and
     /// `dev/research/amf-clean-room.md` Section 4.
     #[inline]
-    fn bucket(score: i32, n: usize) -> usize {
+    fn bucket(score: Idx, n: usize) -> usize {
         if score <= 0 {
             return 0;
         }
@@ -204,7 +205,7 @@ impl Metric for MinFill {
     /// On supervariable merge `j → i`, update the surviving anchor's
     /// score with `max(WF(i), WF(j))` (`ana_orderings.F:4920`).
     #[inline(always)]
-    fn merge_supervariable(parent: &mut i32, child: i32) {
+    fn merge_supervariable(parent: &mut Idx, child: Idx) {
         if child > *parent {
             *parent = child;
         }
@@ -230,14 +231,14 @@ mod tests {
 
     #[test]
     fn min_degree_init_score_is_identity() {
-        for len in [0i32, 1, 17, 1024] {
+        for len in [0 as Idx, 1, 17, 1024] {
             assert_eq!(MinDegree::init_score(len), len);
         }
     }
 
     #[test]
     fn min_degree_bucket_is_identity() {
-        for s in [0i32, 1, 7, 100] {
+        for s in [0 as Idx, 1, 7, 100] {
             assert_eq!(MinDegree::bucket(s, 200), s as usize);
         }
     }
@@ -253,7 +254,7 @@ mod tests {
 
     #[test]
     fn min_degree_merge_does_not_touch_parent() {
-        let mut parent: i32 = 42;
+        let mut parent: Idx = 42;
         MinDegree::merge_supervariable(&mut parent, 7);
         assert_eq!(parent, 42, "AMD merge is a true no-op on the score");
     }
@@ -268,7 +269,7 @@ mod tests {
 
     #[test]
     fn min_fill_init_score_is_len() {
-        for len in [0i32, 1, 17, 1024] {
+        for len in [0 as Idx, 1, 17, 1024] {
             assert_eq!(MinFill::init_score(len), len);
         }
     }
@@ -277,7 +278,7 @@ mod tests {
     #[test]
     fn min_fill_bucket_fine_region_is_identity() {
         let n = 100usize;
-        for s in [0i32, 1, 50, 99, 100] {
+        for s in [0 as Idx, 1, 50, 99, 100] {
             assert_eq!(MinFill::bucket(s, n), s as usize);
         }
     }
@@ -305,7 +306,7 @@ mod tests {
         let nbbuck = 2 * n;
         // bucket(1_000_000) saturates to NBBUCK.
         assert_eq!(MinFill::bucket(1_000_000, n), nbbuck);
-        assert_eq!(MinFill::bucket(i32::MAX, n), nbbuck);
+        assert_eq!(MinFill::bucket(Idx::MAX, n), nbbuck);
     }
 
     /// Small `n` falls through to `PAS = 1` so coarse buckets are
@@ -331,7 +332,7 @@ mod tests {
     fn min_fill_bucket_clamps_nonpositive() {
         assert_eq!(MinFill::bucket(0, 100), 0);
         assert_eq!(MinFill::bucket(-1, 100), 0);
-        assert_eq!(MinFill::bucket(i32::MIN, 100), 0);
+        assert_eq!(MinFill::bucket(Idx::MIN, 100), 0);
     }
 
     /// Coarse bucket region is exactly `idx > n`.
@@ -350,15 +351,15 @@ mod tests {
     /// fill estimates becomes the merged score.
     #[test]
     fn min_fill_merge_takes_max() {
-        let mut parent: i32 = 10;
+        let mut parent: Idx = 10;
         MinFill::merge_supervariable(&mut parent, 25);
         assert_eq!(parent, 25, "child larger ⇒ adopt child");
 
-        let mut parent: i32 = 100;
+        let mut parent: Idx = 100;
         MinFill::merge_supervariable(&mut parent, 7);
         assert_eq!(parent, 100, "child smaller ⇒ keep parent");
 
-        let mut parent: i32 = 42;
+        let mut parent: Idx = 42;
         MinFill::merge_supervariable(&mut parent, 42);
         assert_eq!(parent, 42, "equal ⇒ unchanged");
     }
@@ -371,8 +372,8 @@ mod tests {
     fn min_fill_run_elimination_completes() {
         use crate::quotient_graph::WorkspaceOptions;
         use crate::CscPattern;
-        let cp = [0i32, 1, 2];
-        let ri = [0i32, 1];
+        let cp = [0 as Idx, 1, 2];
+        let ri = [0 as Idx, 1];
         let p = CscPattern::new(2, &cp, &ri).unwrap();
         let mut ws =
             Workspace::new_with_n_buckets(&p, &WorkspaceOptions::default(), MinFill::n_buckets(2))

@@ -26,8 +26,9 @@
 use crate::graph::Graph;
 use crate::rng::SplitMix;
 use crate::MetisOptions;
+use feral_ordering_core::Idx;
 
-const UNMATCHED: i32 = -1;
+const UNMATCHED: Idx = -1;
 
 /// Output of one coarsening level.
 #[derive(Debug)]
@@ -36,7 +37,7 @@ pub struct CoarseGraph {
     pub graph: Graph,
     /// Map from fine vertex index to coarse vertex index. Length
     /// `fine.nvtxs`.
-    pub cmap: Vec<i32>,
+    pub cmap: Vec<Idx>,
 }
 
 /// Coarsening-pass diagnostics (accumulated into `MetisStats`).
@@ -56,8 +57,8 @@ pub fn coarsen_level(
     counters: &mut CoarsenCounters,
 ) -> CoarseGraph {
     let n = fine.nvtxs as usize;
-    let mut match_: Vec<i32> = vec![UNMATCHED; n];
-    let mut cmap: Vec<i32> = vec![-1; n];
+    let mut match_: Vec<Idx> = vec![UNMATCHED; n];
+    let mut cmap: Vec<Idx> = vec![-1; n];
 
     // --- Pass 1: SHEM ---
     // Sorted Heavy-Edge Matching: visit vertices in ascending degree
@@ -70,11 +71,11 @@ pub fn coarsen_level(
     // irregular / power-law inputs SHEM is meant for. `sort_by_key` is
     // stable, so the random shuffle survives as the within-degree
     // tie-break, preserving seed determinism. [O7]
-    let mut order: Vec<i32> = (0..fine.nvtxs).collect();
+    let mut order: Vec<Idx> = (0..fine.nvtxs).collect();
     rng.shuffle(&mut order);
     order.sort_by_key(|&v| fine.xadj[v as usize + 1] - fine.xadj[v as usize]);
 
-    let mut cnvtxs: i32 = 0;
+    let mut cnvtxs: Idx = 0;
     for &v in &order {
         let vu = v as usize;
         if match_[vu] != UNMATCHED {
@@ -82,8 +83,8 @@ pub fn coarsen_level(
         }
         let lo = fine.xadj[vu] as usize;
         let hi = fine.xadj[vu + 1] as usize;
-        let mut best: i32 = -1;
-        let mut best_w: i32 = -1;
+        let mut best: Idx = -1;
+        let mut best_w: Idx = -1;
         for k in lo..hi {
             let u = fine.adjncy[k];
             if match_[u as usize] != UNMATCHED {
@@ -136,7 +137,7 @@ pub fn coarsen(
     let mut prev_nvtxs = fine.nvtxs;
     let mut cur: &Graph = fine;
     loop {
-        if cur.nvtxs <= opts.coarsen_floor as i32 {
+        if cur.nvtxs <= opts.coarsen_floor as Idx {
             break;
         }
         let level = coarsen_level(cur, rng, opts.two_hop_ratio_threshold, counters);
@@ -163,7 +164,7 @@ pub fn coarsen(
 /// 2-hop matching pass: revisit self-matched vertices and pair them
 /// with another self-matched vertex that shares a common neighbor.
 /// Rebuilds `cmap` and returns the new `cnvtxs`.
-fn two_hop_pass(fine: &Graph, match_: &mut [i32], cmap: &mut [i32]) -> i32 {
+fn two_hop_pass(fine: &Graph, match_: &mut [Idx], cmap: &mut [Idx]) -> Idx {
     for v in 0..fine.nvtxs {
         let vu = v as usize;
         if match_[vu] != v {
@@ -174,7 +175,7 @@ fn two_hop_pass(fine: &Graph, match_: &mut [i32], cmap: &mut [i32]) -> i32 {
         // currently self-matched.
         let lo = fine.xadj[vu] as usize;
         let hi = fine.xadj[vu + 1] as usize;
-        let mut partner: i32 = -1;
+        let mut partner: Idx = -1;
         'outer: for k in lo..hi {
             let mid = fine.adjncy[k];
             let mlo = fine.xadj[mid as usize] as usize;
@@ -197,7 +198,7 @@ fn two_hop_pass(fine: &Graph, match_: &mut [i32], cmap: &mut [i32]) -> i32 {
 
     // Rebuild cmap contiguous from the (possibly updated) match_.
     cmap.iter_mut().for_each(|c| *c = -1);
-    let mut cnvtxs: i32 = 0;
+    let mut cnvtxs: Idx = 0;
     for v in 0..fine.nvtxs {
         let vu = v as usize;
         if cmap[vu] >= 0 {
@@ -214,29 +215,29 @@ fn two_hop_pass(fine: &Graph, match_: &mut [i32], cmap: &mut [i32]) -> i32 {
 }
 
 /// Build the coarse graph from a fine graph and a fine-to-coarse map.
-fn contract(fine: &Graph, cmap: &[i32], cnvtxs: i32) -> Graph {
+fn contract(fine: &Graph, cmap: &[Idx], cnvtxs: Idx) -> Graph {
     let cn = cnvtxs as usize;
     // Accumulate vertex weights.
-    let mut vwgt: Vec<i32> = vec![0; cn];
+    let mut vwgt: Vec<Idx> = vec![0; cn];
     for v in 0..fine.nvtxs as usize {
         vwgt[cmap[v] as usize] = vwgt[cmap[v] as usize].saturating_add(fine.vwgt[v]);
     }
     // Group fine vertices by coarse id to avoid rescans.
-    let mut head: Vec<i32> = vec![-1; cn];
-    let mut next: Vec<i32> = vec![-1; fine.nvtxs as usize];
+    let mut head: Vec<Idx> = vec![-1; cn];
+    let mut next: Vec<Idx> = vec![-1; fine.nvtxs as usize];
     for v in 0..fine.nvtxs as usize {
         let c = cmap[v] as usize;
         next[v] = head[c];
-        head[c] = v as i32;
+        head[c] = v as Idx;
     }
     // Contract one coarse vertex at a time with an edge-weight marker.
-    let mut marker: Vec<i32> = vec![-1; cn];
-    let mut weight_to: Vec<i32> = vec![0; cn];
-    let mut xadj: Vec<i32> = Vec::with_capacity(cn + 1);
-    let mut adjncy: Vec<i32> = Vec::with_capacity(fine.adjncy.len());
-    let mut adjwgt: Vec<i32> = Vec::with_capacity(fine.adjncy.len());
+    let mut marker: Vec<Idx> = vec![-1; cn];
+    let mut weight_to: Vec<Idx> = vec![0; cn];
+    let mut xadj: Vec<Idx> = Vec::with_capacity(cn + 1);
+    let mut adjncy: Vec<Idx> = Vec::with_capacity(fine.adjncy.len());
+    let mut adjwgt: Vec<Idx> = Vec::with_capacity(fine.adjncy.len());
     xadj.push(0);
-    let mut touched: Vec<i32> = Vec::new();
+    let mut touched: Vec<Idx> = Vec::new();
     for (c, &head_c) in head.iter().enumerate().take(cn) {
         touched.clear();
         let mut v = head_c;
@@ -247,13 +248,13 @@ fn contract(fine: &Graph, cmap: &[i32], cnvtxs: i32) -> Graph {
             for k in lo..hi {
                 let nbr = fine.adjncy[k];
                 let cn2 = cmap[nbr as usize];
-                if cn2 == c as i32 {
+                if cn2 == c as Idx {
                     // self-loop after contraction — drop
                     continue;
                 }
                 let cu = cn2 as usize;
-                if marker[cu] != c as i32 {
-                    marker[cu] = c as i32;
+                if marker[cu] != c as Idx {
+                    marker[cu] = c as Idx;
                     weight_to[cu] = fine.adjwgt[k];
                     touched.push(cn2);
                 } else {
@@ -266,7 +267,7 @@ fn contract(fine: &Graph, cmap: &[i32], cnvtxs: i32) -> Graph {
             adjncy.push(tgt);
             adjwgt.push(weight_to[tgt as usize]);
         }
-        xadj.push(adjncy.len() as i32);
+        xadj.push(adjncy.len() as Idx);
     }
     Graph {
         nvtxs: cnvtxs,
@@ -283,26 +284,26 @@ mod tests {
     use feral_ordering_core::CscPattern;
     use std::collections::BTreeSet;
 
-    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>) {
+    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<Idx>, Vec<Idx>) {
         let mut set: BTreeSet<(usize, usize)> = BTreeSet::new();
         for &(i, j) in triples {
             set.insert((i, j));
             set.insert((j, i));
         }
-        let mut cols: Vec<Vec<i32>> = vec![Vec::new(); n];
+        let mut cols: Vec<Vec<Idx>> = vec![Vec::new(); n];
         for &(r, c) in &set {
-            cols[c].push(r as i32);
+            cols[c].push(r as Idx);
         }
         for col in &mut cols {
             col.sort();
         }
-        let mut col_ptr: Vec<i32> = vec![0];
-        let mut row_idx: Vec<i32> = Vec::new();
+        let mut col_ptr: Vec<Idx> = vec![0];
+        let mut row_idx: Vec<Idx> = Vec::new();
         for col in &cols {
             for &r in col {
                 row_idx.push(r);
             }
-            col_ptr.push(row_idx.len() as i32);
+            col_ptr.push(row_idx.len() as Idx);
         }
         (col_ptr, row_idx)
     }
@@ -347,8 +348,8 @@ mod tests {
             assert!(c >= 0 && c < cg.graph.nvtxs, "cmap entry OOB: {}", c);
         }
         // Vertex weight conservation.
-        let fine_total: i64 = fine.vwgt.iter().map(|&x| x as i64).sum();
-        let coarse_total: i64 = cg.graph.vwgt.iter().map(|&x| x as i64).sum();
+        let fine_total: i64 = fine.vwgt.iter().copied().sum();
+        let coarse_total: i64 = cg.graph.vwgt.iter().copied().sum();
         assert_eq!(fine_total, coarse_total, "vwgt conservation");
         // No self-loops in coarse graph.
         for v in 0..cg.graph.nvtxs {
@@ -483,7 +484,7 @@ mod tests {
         // Coarsest level is at or below floor (the loop stops on
         // the first level whose vertex count dips below floor).
         assert!(
-            prev <= opts.coarsen_floor as i32
+            prev <= opts.coarsen_floor as Idx
                 || levels.last().expect("non-empty").graph.nvtxs < g.nvtxs
         );
     }
@@ -543,11 +544,11 @@ mod tests {
         let pat = CscPattern::new(n, &cp, &ri).unwrap();
         let fine = Graph::from_csc_pattern(&pat).unwrap();
         // Force a matching 0<->3 by custom cmap.
-        let cmap: Vec<i32> = vec![0, 1, 2, 0];
+        let cmap: Vec<Idx> = vec![0, 1, 2, 0];
         let coarse = contract(&fine, &cmap, 3);
         // Coarse vertex 0 = {0,3}: weight 2 to coarse vertex 1 (via
         // 0-1 and 3-1), weight 2 to coarse vertex 2.
-        let mut got: Vec<(i32, i32)> = Vec::new();
+        let mut got: Vec<(Idx, Idx)> = Vec::new();
         let lo = coarse.xadj[0] as usize;
         let hi = coarse.xadj[1] as usize;
         for k in lo..hi {

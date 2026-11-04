@@ -30,7 +30,7 @@ use feral_ordering_core::CscPattern;
 /// Used by both AMD and AMF unit tests; AMF must defer the hub to
 /// the end of the elimination order (Section 9 of the research
 /// note's small-matrix derivation).
-fn arrow_3() -> (Vec<i32>, Vec<i32>) {
+fn arrow_3() -> (Vec<i64>, Vec<i64>) {
     // Full-symmetric, including diagonal entries (which the workspace
     // ingest filters out).
     let col_ptr = vec![0, 3, 5, 7];
@@ -51,7 +51,7 @@ fn arrow_3() -> (Vec<i32>, Vec<i32>) {
 /// {0, 1, 2, 3}; rows 1-3 each connect to {0, 4}. Both hubs share
 /// the same fill cost — AMF should not eliminate either before the
 /// inner spine variables are processed.
-fn dual_arrow_5() -> (Vec<i32>, Vec<i32>) {
+fn dual_arrow_5() -> (Vec<i64>, Vec<i64>) {
     // Adjacencies (excluding diagonal):
     // 0: 1 2 3 4    (hub left)
     // 1: 0 4
@@ -70,25 +70,25 @@ fn dual_arrow_5() -> (Vec<i32>, Vec<i32>) {
 }
 
 /// Tridiagonal `n×n` with adjacencies `i ~ i±1`.
-fn tridiag(n: usize) -> (Vec<i32>, Vec<i32>) {
+fn tridiag(n: usize) -> (Vec<i64>, Vec<i64>) {
     let mut col_ptr = Vec::with_capacity(n + 1);
     let mut row_idx = Vec::new();
     col_ptr.push(0);
     for j in 0..n {
         if j > 0 {
-            row_idx.push((j - 1) as i32);
+            row_idx.push((j - 1) as i64);
         }
-        row_idx.push(j as i32);
+        row_idx.push(j as i64);
         if j + 1 < n {
-            row_idx.push((j + 1) as i32);
+            row_idx.push((j + 1) as i64);
         }
-        col_ptr.push(row_idx.len() as i32);
+        col_ptr.push(row_idx.len() as i64);
     }
     (col_ptr, row_idx)
 }
 
 /// Banded matrix of width `b` (off-diagonal half-bandwidth).
-fn banded(n: usize, b: usize) -> (Vec<i32>, Vec<i32>) {
+fn banded(n: usize, b: usize) -> (Vec<i64>, Vec<i64>) {
     let mut col_ptr = Vec::with_capacity(n + 1);
     let mut row_idx = Vec::new();
     col_ptr.push(0);
@@ -96,9 +96,9 @@ fn banded(n: usize, b: usize) -> (Vec<i32>, Vec<i32>) {
         let lo = j.saturating_sub(b);
         let hi = (j + b + 1).min(n);
         for r in lo..hi {
-            row_idx.push(r as i32);
+            row_idx.push(r as i64);
         }
-        col_ptr.push(row_idx.len() as i32);
+        col_ptr.push(row_idx.len() as i64);
     }
     (col_ptr, row_idx)
 }
@@ -108,7 +108,7 @@ fn banded(n: usize, b: usize) -> (Vec<i32>, Vec<i32>) {
 // matrix dimension; they hold for *any* successful `Metric`.
 // ---------------------------------------------------------------------
 
-fn assert_is_permutation(perm: &[i32], n: usize) {
+fn assert_is_permutation(perm: &[i64], n: usize) {
     assert_eq!(perm.len(), n, "perm length must equal n");
     let mut seen = vec![false; n];
     for &p in perm {
@@ -196,8 +196,8 @@ fn minfill_banded_20_3_perm() {
 
 #[test]
 fn mindegree_empty_pattern_perm() {
-    let cp = [0i32];
-    let ri: [i32; 0] = [];
+    let cp = [0i64];
+    let ri: [i64; 0] = [];
     let p = CscPattern::new(0, &cp, &ri).expect("empty pattern");
     let opts = WorkspaceOptions::default();
     let (perm, _) = order::<MinDegree>(&p, &opts, true).expect("n=0 succeeds");
@@ -206,8 +206,8 @@ fn mindegree_empty_pattern_perm() {
 
 #[test]
 fn minfill_empty_pattern_perm() {
-    let cp = [0i32];
-    let ri: [i32; 0] = [];
+    let cp = [0i64];
+    let ri: [i64; 0] = [];
     let p = CscPattern::new(0, &cp, &ri).expect("empty pattern");
     let opts = WorkspaceOptions::default();
     let (perm, _) = order::<MinFill>(&p, &opts, true).expect("n=0 succeeds");

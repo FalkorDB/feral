@@ -2,8 +2,8 @@
 //! bottom-up orderings.
 //!
 //! All arrays follow the faer / SuiteSparse naming convention and use
-//! signed `i32` so we can reserve negative values for sentinels via
-//! [`flip`]: `flip(x) = -2 - x`. The input pattern is also `i32`-
+//! signed `Idx` so we can reserve negative values for sentinels via
+//! [`flip`]: `flip(x) = -2 - x`. The input pattern is also `Idx`-
 //! indexed (per the ordering-crate contract), so workspace ingestion
 //! converts to `usize` only for Rust slice addressing.
 //!
@@ -24,16 +24,17 @@
 #![allow(dead_code)]
 
 use super::WorkspaceOptions;
+use crate::Idx;
 use crate::{CscPattern, OrderingError};
 
-/// Sentinel for "no index" in the `i32` arrays.
-pub const NONE: i32 = -1;
+/// Sentinel for "no index" in the `Idx` arrays.
+pub const NONE: Idx = -1;
 
 /// Sentinel encoding used by the quotient graph: `flip(x) = -2 - x`.
 /// Used to mark absorbed elements (`pe[e] < 0` ⇒ `flip(parent)`) and
 /// as a tag on `elen` for freshly eliminated zero-degree variables.
 #[inline(always)]
-pub fn flip(x: i32) -> i32 {
+pub fn flip(x: Idx) -> Idx {
     -2 - x
 }
 
@@ -46,7 +47,7 @@ pub fn flip(x: i32) -> i32 {
 ///
 /// Reference: `amd.rs:130-143`.
 #[inline]
-pub fn clear_flag(wflg: i32, wbig: i32, w: &mut [i32]) -> i32 {
+pub fn clear_flag(wflg: Idx, wbig: Idx, w: &mut [Idx]) -> Idx {
     if wflg < 2 || wflg >= wbig {
         for x in w.iter_mut() {
             if *x != 0 {
@@ -68,17 +69,17 @@ pub struct Workspace {
     pub n: usize,
     pub iwlen: usize,
     pub pfree: usize,
-    pub iw: Vec<i32>,
+    pub iw: Vec<Idx>,
 
-    pub pe: Vec<i32>,
-    pub len: Vec<i32>,
-    pub nv: Vec<i32>,
-    pub elen: Vec<i32>,
-    pub degree: Vec<i32>,
-    pub w: Vec<i32>,
-    pub head: Vec<i32>,
-    pub next: Vec<i32>,
-    pub last: Vec<i32>,
+    pub pe: Vec<Idx>,
+    pub len: Vec<Idx>,
+    pub nv: Vec<Idx>,
+    pub elen: Vec<Idx>,
+    pub degree: Vec<Idx>,
+    pub w: Vec<Idx>,
+    pub head: Vec<Idx>,
+    pub next: Vec<Idx>,
+    pub last: Vec<Idx>,
     /// Per-supervariable / per-element fill-score scratch used by the
     /// AMF inner loop only. Length `n`. Ignored by the AMD path
     /// (`feral-amd` never reads or writes it). For variable indices
@@ -86,21 +87,21 @@ pub struct Workspace {
     /// `e`, holds the lazily-cached `dext * (2*deg(e) - dext - 1)`
     /// surface contribution (sentinel `0` = "first touch this iter").
     ///
-    /// `i64` (not `i32`): the un-quantized surface contribution has
+    /// `i64` (not upstream's `i32`): the un-quantized surface contribution has
     /// both factors `O(n)`, so it reaches ~`n^2` and overflows `i32`
     /// for `n` ≳ 46k before being consumed as `f64` in the RMF score
     /// (O1, `dev/research/repo-review-2026-06-09.md`). MUMPS computes
     /// the RMF in DBLE for the same reason. The post-quantization RMF
-    /// score stored here later is bounded by `i32::MAX - 1`.
+    /// score stored here later is bounded by `Idx::MAX - 1`.
     pub wf: Vec<i64>,
 
     /// Generation counter for the mark array `w`.
-    pub wflg: i32,
-    /// Overflow ceiling for `wflg`: `i32::MAX - n`.
-    pub wbig: i32,
+    pub wflg: Idx,
+    /// Overflow ceiling for `wflg`: `Idx::MAX - n`.
+    pub wbig: Idx,
     /// Largest element size encountered so far — used by supervariable
     /// detection (Slice B) to bump `wflg` safely.
-    pub lemax: i32,
+    pub lemax: Idx,
     /// Lower bound on the next pivot's degree. Monotone non-decreasing.
     pub mindeg: usize,
     /// Number of garbage-collection compactions so far.
@@ -108,7 +109,7 @@ pub struct Workspace {
     /// Supervariables eliminated so far (pivoted OR dense-deferred).
     pub nel: usize,
     /// Dense-deferred supervariable count.
-    pub ndense: i32,
+    pub ndense: Idx,
     /// Variables folded into a concurrent pivot by mass elimination.
     pub n_mass_elim: u32,
     /// Supervariable merges detected during indistinguishable-variable
@@ -153,18 +154,18 @@ impl Workspace {
         let n = pattern.n;
         debug_assert!(n_buckets >= n, "n_buckets must cover deg ∈ [0, n)");
 
-        // i32 addressing requires n < i32::MAX. The algorithm also
-        // stores `pfree` as i32 via `pe[i]`, so iwlen must fit.
-        if n >= i32::MAX as usize {
+        // Idx addressing requires n < Idx::MAX. The algorithm also
+        // stores `pfree` as Idx via `pe[i]`, so iwlen must fit.
+        if n >= Idx::MAX as usize {
             return Err(OrderingError::IndexOverflow);
         }
 
         // Count off-diagonal entries per column.
-        let mut len: Vec<i32> = vec![0; n];
+        let mut len: Vec<Idx> = vec![0; n];
         let mut nzaat: usize = 0;
         #[allow(clippy::needless_range_loop)]
         for j in 0..n {
-            let j_i32 = j as i32;
+            let j_i32 = j as Idx;
             let start = pattern.col_ptr[j] as usize;
             let end = pattern.col_ptr[j + 1] as usize;
             let mut cnt: usize = 0;
@@ -173,7 +174,7 @@ impl Workspace {
                     cnt += 1;
                 }
             }
-            len[j] = cnt as i32;
+            len[j] = cnt as Idx;
             nzaat += cnt;
         }
 
@@ -182,21 +183,21 @@ impl Workspace {
             .checked_add(nzaat / 5)
             .and_then(|s| s.checked_add(n))
             .ok_or(OrderingError::IndexOverflow)?;
-        if iwlen > i32::MAX as usize {
+        if iwlen > Idx::MAX as usize {
             return Err(OrderingError::IndexOverflow);
         }
         // iw needs at least one slot even when n==0 so `pfree` is
         // addressable; we allocate exactly iwlen.
-        let mut iw: Vec<i32> = vec![0; iwlen];
+        let mut iw: Vec<Idx> = vec![0; iwlen];
 
         // pe[j] = start of j's adjacency list in iw; fill iw with
         // off-diagonals, in the order they appear in the CSC pattern.
-        let mut pe: Vec<i32> = vec![0; n];
+        let mut pe: Vec<Idx> = vec![0; n];
         let mut pfree: usize = 0;
         #[allow(clippy::needless_range_loop)]
         for j in 0..n {
-            pe[j] = pfree as i32;
-            let j_i32 = j as i32;
+            pe[j] = pfree as Idx;
+            let j_i32 = j as Idx;
             let start = pattern.col_ptr[j] as usize;
             let end = pattern.col_ptr[j + 1] as usize;
             for &r in &pattern.row_idx[start..end] {
@@ -217,20 +218,20 @@ impl Workspace {
         let dense = dense.max(16).min(n);
 
         // Fixed-value arrays.
-        let mut nv: Vec<i32> = vec![1; n];
-        let mut elen: Vec<i32> = vec![0; n];
-        let mut w: Vec<i32> = vec![1; n];
-        let degree: Vec<i32> = len.clone();
-        let mut head: Vec<i32> = vec![NONE; n_buckets];
-        let mut next: Vec<i32> = vec![NONE; n];
-        let mut last: Vec<i32> = vec![NONE; n];
+        let mut nv: Vec<Idx> = vec![1; n];
+        let mut elen: Vec<Idx> = vec![0; n];
+        let mut w: Vec<Idx> = vec![1; n];
+        let degree: Vec<Idx> = len.clone();
+        let mut head: Vec<Idx> = vec![NONE; n_buckets];
+        let mut next: Vec<Idx> = vec![NONE; n];
+        let mut last: Vec<Idx> = vec![NONE; n];
         let mut wf: Vec<i64> = vec![0; n];
 
-        let wbig = i32::MAX - n as i32;
+        let wbig = Idx::MAX - n as Idx;
         let wflg = 0; // clear_flag will lift to 2 on first use.
 
         let mut nel: usize = 0;
-        let mut ndense: i32 = 0;
+        let mut ndense: Idx = 0;
 
         // Classify each variable.
         for i in 0..n {
@@ -256,10 +257,10 @@ impl Workspace {
                 // path can compute `bucket(wf[i], n)` consistently.
                 let inext = head[deg];
                 if inext != NONE {
-                    last[inext as usize] = i as i32;
+                    last[inext as usize] = i as Idx;
                 }
                 next[i] = inext;
-                head[deg] = i as i32;
+                head[deg] = i as Idx;
                 wf[i] = deg as i64;
             }
         }
@@ -296,13 +297,13 @@ impl Workspace {
 mod tests {
     use super::*;
 
-    fn pat<'a>(n: usize, cp: &'a [i32], ri: &'a [i32]) -> CscPattern<'a> {
+    fn pat<'a>(n: usize, cp: &'a [Idx], ri: &'a [Idx]) -> CscPattern<'a> {
         CscPattern::new(n, cp, ri).expect("valid test pattern")
     }
 
     #[test]
     fn flip_involution() {
-        for x in [-100i32, -1, 0, 1, 17, 1000] {
+        for x in [-100 as Idx, -1, 0, 1, 17, 1000] {
             assert_eq!(flip(flip(x)), x);
         }
     }
@@ -412,32 +413,32 @@ mod tests {
     #[test]
     fn arrow_200_hub_deferred() {
         let n = 200usize;
-        let mut cp: Vec<i32> = Vec::with_capacity(n + 1);
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = Vec::with_capacity(n + 1);
+        let mut ri: Vec<Idx> = Vec::new();
         cp.push(0);
         // col 0: diagonal + all spokes 1..n
         ri.push(0);
         for r in 1..n {
-            ri.push(r as i32);
+            ri.push(r as Idx);
         }
-        cp.push(ri.len() as i32);
+        cp.push(ri.len() as Idx);
         // cols 1..n: diagonal + hub
         for j in 1..n {
             ri.push(0);
-            ri.push(j as i32);
-            cp.push(ri.len() as i32);
+            ri.push(j as Idx);
+            cp.push(ri.len() as Idx);
         }
         let p = pat(n, &cp, &ri);
         let ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
 
-        assert_eq!(ws.degree[0], (n - 1) as i32);
+        assert_eq!(ws.degree[0], (n - 1) as Idx);
         assert_eq!(ws.nel, 1, "hub only");
         assert_eq!(ws.ndense, 1);
         assert_eq!(ws.nv[0], 0, "hub marked deferred");
         assert_eq!(ws.pe[0], NONE);
         assert_eq!(ws.elen[0], NONE);
         // Spokes all land in head[1] — LIFO, last in is n-1.
-        assert_eq!(ws.head[1], (n - 1) as i32);
+        assert_eq!(ws.head[1], (n - 1) as Idx);
     }
 
     /// With `dense_alpha < 0`, the threshold is set to `n - 2`
@@ -449,15 +450,15 @@ mod tests {
         // Band(20, 5): max degree = 10, well under n - 2 = 18.
         let n = 20usize;
         let b = 5usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         for j in 0..n {
             let lo = j.saturating_sub(b);
             let hi = (j + b + 1).min(n);
             for r in lo..hi {
-                ri.push(r as i32);
+                ri.push(r as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = pat(n, &cp, &ri);
         let opts = WorkspaceOptions { dense_alpha: -1.0 };
@@ -468,8 +469,8 @@ mod tests {
 
     #[test]
     fn empty_pattern_ok() {
-        let cp = [0i32];
-        let ri: [i32; 0] = [];
+        let cp = [0 as Idx];
+        let ri: [Idx; 0] = [];
         let p = pat(0, &cp, &ri);
         let ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
         assert_eq!(ws.n, 0);

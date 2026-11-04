@@ -20,6 +20,7 @@
 //! operation is acceptable at the graph sizes FERAL targets
 //! (≤ 100k vertices, FM rarely dominates runtime).
 
+use feral_ordering_core::Idx;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -37,23 +38,23 @@ pub fn refine_bisection(
     labels: &mut [u8],
     max_imbalance: f64,
     max_passes: u32,
-) -> i32 {
+) -> Idx {
     let n = graph.nvtxs as usize;
     if n < 2 {
         return cut_size(graph, labels);
     }
-    let total: i64 = graph.vwgt.iter().map(|&w| w as i64).sum();
+    let total: i64 = graph.vwgt.iter().copied().sum();
     let max_side = ((1.0 + max_imbalance) * total as f64 / 2.0).ceil() as i64;
 
     let mut pass_cut = cut_size(graph, labels);
 
     for _pass in 0..max_passes {
         let before_pass = pass_cut;
-        let mut gain: Vec<i32> = vec![0; n];
+        let mut gain: Vec<Idx> = vec![0; n];
         compute_gains(graph, labels, &mut gain);
 
         let mut locked: Vec<bool> = vec![false; n];
-        let mut heap: BinaryHeap<(i32, Reverse<i32>, i32)> = BinaryHeap::new();
+        let mut heap: BinaryHeap<(Idx, Reverse<Idx>, Idx)> = BinaryHeap::new();
         // (gain, Reverse(vertex), stamp): stamp is the gain snapshot
         // stored alongside the entry so stale entries can be skipped.
         //
@@ -69,11 +70,11 @@ pub fn refine_bisection(
         // sizes (≤ 100k vertices, where FM rarely dominates runtime);
         // see dev/tried-and-rejected.md (O11).
         for (v, &g) in gain.iter().enumerate().take(n) {
-            heap.push((g, Reverse(v as i32), g));
+            heap.push((g, Reverse(v as Idx), g));
         }
 
         let mut cur_cut = pass_cut;
-        let mut moves: Vec<i32> = Vec::new();
+        let mut moves: Vec<Idx> = Vec::new();
         let mut a_w = part_weight(graph, labels, PART_A);
         let mut b_w = total - a_w;
         // If the pass starts imbalanced, best_prefix = None means
@@ -101,9 +102,9 @@ pub fn refine_bisection(
             let from = labels[vu];
             let to = if from == PART_A { PART_B } else { PART_A };
             let (new_a_w, new_b_w) = if to == PART_A {
-                (a_w + graph.vwgt[vu] as i64, b_w - graph.vwgt[vu] as i64)
+                (a_w + graph.vwgt[vu], b_w - graph.vwgt[vu])
             } else {
-                (a_w - graph.vwgt[vu] as i64, b_w + graph.vwgt[vu] as i64)
+                (a_w - graph.vwgt[vu], b_w + graph.vwgt[vu])
             };
             let side_max = new_a_w.max(new_b_w);
             // Always allow the move so FM can climb out of poor local
@@ -135,7 +136,7 @@ pub fn refine_bisection(
                 } else {
                     gain[u] -= 2 * w;
                 }
-                heap.push((gain[u], Reverse(u as i32), gain[u]));
+                heap.push((gain[u], Reverse(u as Idx), gain[u]));
             }
 
             if side_max <= max_side {
@@ -190,12 +191,12 @@ pub fn refine_bisection(
 }
 
 /// Compute per-vertex gain = (edges to other side) - (edges to own side).
-fn compute_gains(graph: &Graph, labels: &[u8], gain: &mut [i32]) {
+fn compute_gains(graph: &Graph, labels: &[u8], gain: &mut [Idx]) {
     for (v, &lv) in labels.iter().enumerate() {
         let lo = graph.xadj[v] as usize;
         let hi = graph.xadj[v + 1] as usize;
-        let mut ed: i32 = 0;
-        let mut id: i32 = 0;
+        let mut ed: Idx = 0;
+        let mut id: Idx = 0;
         for k in lo..hi {
             let u = graph.adjncy[k] as usize;
             let w = graph.adjwgt[k];
@@ -218,7 +219,7 @@ pub fn refine_separator(
     max_passes: u32,
 ) -> i64 {
     let n = graph.nvtxs as usize;
-    let total: i64 = graph.vwgt.iter().map(|&w| w as i64).sum();
+    let total: i64 = graph.vwgt.iter().copied().sum();
     let max_side = ((1.0 + max_imbalance) * total as f64 / 2.0).ceil() as i64;
 
     for _pass in 0..max_passes {
@@ -231,7 +232,7 @@ pub fn refine_separator(
             }
             // Compute cost of pulling v to side A or side B.
             let (cost_to_a, cost_to_b) = separator_pull_costs(graph, labels, v);
-            let vwgt_v = graph.vwgt[v] as i64;
+            let vwgt_v = graph.vwgt[v];
             // Net separator change = cost_to_side - vwgt_v.
             // Move is beneficial if cost_to_side < vwgt_v (gain > 0).
             let gain_a = vwgt_v - cost_to_a;
@@ -274,9 +275,9 @@ pub fn refine_separator(
                 if labels[u] == far {
                     labels[u] = PART_SEP;
                     if far == PART_A {
-                        a_w -= graph.vwgt[u] as i64;
+                        a_w -= graph.vwgt[u];
                     } else {
-                        b_w -= graph.vwgt[u] as i64;
+                        b_w -= graph.vwgt[u];
                     }
                 }
             }
@@ -322,7 +323,7 @@ pub fn refine_separator_fm(
 ) -> i64 {
     let n = graph.nvtxs as usize;
     debug_assert_eq!(labels.len(), n);
-    let total: i64 = graph.vwgt.iter().map(|&w| w as i64).sum();
+    let total: i64 = graph.vwgt.iter().copied().sum();
     let max_side = ((1.0 + max_imbalance) * total as f64 / 2.0).ceil() as i64;
 
     let mut pwgt = [
@@ -355,7 +356,7 @@ pub fn refine_separator_fm(
         for v in 0..n {
             if labels[v] == PART_SEP {
                 n_sep += 1;
-                heap.push((graph.vwgt[v] as i64 - edeg[v][other_i], Reverse(v)));
+                heap.push((graph.vwgt[v] - edeg[v][other_i], Reverse(v)));
             }
         }
         if n_sep == 0 {
@@ -375,37 +376,37 @@ pub fn refine_separator_fm(
             if labels[v] != PART_SEP || moved[v] {
                 continue;
             }
-            let cur = graph.vwgt[v] as i64 - edeg[v][other_i];
+            let cur = graph.vwgt[v] - edeg[v][other_i];
             if key != cur {
                 // Stale entry; a fresher one is in the heap.
                 continue;
             }
-            if pwgt[to_i] + graph.vwgt[v] as i64 > max_side {
+            if pwgt[to_i] + graph.vwgt[v] > max_side {
                 break;
             }
             // Apply the move.
             moved[v] = true;
             labels[v] = to;
-            pwgt[to_i] += graph.vwgt[v] as i64;
-            sep -= graph.vwgt[v] as i64;
+            pwgt[to_i] += graph.vwgt[v];
+            sep -= graph.vwgt[v];
             let mut dragged: Vec<usize> = Vec::new();
             for k in graph.xadj[v] as usize..graph.xadj[v + 1] as usize {
                 let u = graph.adjncy[k] as usize;
                 match labels[u] {
                     l if l == other => {
                         labels[u] = PART_SEP;
-                        pwgt[other_i] -= graph.vwgt[u] as i64;
-                        sep += graph.vwgt[u] as i64;
+                        pwgt[other_i] -= graph.vwgt[u];
+                        sep += graph.vwgt[u];
                         edeg[u] = side_degrees(graph, labels, u);
                         dragged.push(u);
                         if !moved[u] {
-                            heap.push((graph.vwgt[u] as i64 - edeg[u][other_i], Reverse(u)));
+                            heap.push((graph.vwgt[u] - edeg[u][other_i], Reverse(u)));
                         }
                     }
                     PART_SEP => {
-                        edeg[u][to_i] += graph.vwgt[v] as i64;
+                        edeg[u][to_i] += graph.vwgt[v];
                         if !moved[u] {
-                            heap.push((graph.vwgt[u] as i64 - edeg[u][other_i], Reverse(u)));
+                            heap.push((graph.vwgt[u] - edeg[u][other_i], Reverse(u)));
                         }
                     }
                     _ => {}
@@ -416,9 +417,9 @@ pub fn refine_separator_fm(
                 for k in graph.xadj[u] as usize..graph.xadj[u + 1] as usize {
                     let w = graph.adjncy[k] as usize;
                     if labels[w] == PART_SEP && w != u {
-                        edeg[w][other_i] -= graph.vwgt[u] as i64;
+                        edeg[w][other_i] -= graph.vwgt[u];
                         if !moved[w] {
-                            heap.push((graph.vwgt[w] as i64 - edeg[w][other_i], Reverse(w)));
+                            heap.push((graph.vwgt[w] - edeg[w][other_i], Reverse(w)));
                         }
                     }
                 }
@@ -439,12 +440,12 @@ pub fn refine_separator_fm(
             let v = moves.pop().unwrap_or(0);
             let dragged = pulled.pop().unwrap_or_default();
             labels[v] = PART_SEP;
-            pwgt[to_i] -= graph.vwgt[v] as i64;
-            sep += graph.vwgt[v] as i64;
+            pwgt[to_i] -= graph.vwgt[v];
+            sep += graph.vwgt[v];
             for u in dragged {
                 labels[u] = other;
-                pwgt[other_i] += graph.vwgt[u] as i64;
-                sep -= graph.vwgt[u] as i64;
+                pwgt[other_i] += graph.vwgt[u];
+                sep -= graph.vwgt[u];
             }
         }
         debug_assert_eq!(sep, best_sep);
@@ -462,9 +463,9 @@ fn side_degrees(graph: &Graph, labels: &[u8], v: usize) -> [i64; 2] {
     for k in graph.xadj[v] as usize..graph.xadj[v + 1] as usize {
         let u = graph.adjncy[k] as usize;
         if labels[u] == PART_A {
-            d[0] += graph.vwgt[u] as i64;
+            d[0] += graph.vwgt[u];
         } else if labels[u] == PART_B {
-            d[1] += graph.vwgt[u] as i64;
+            d[1] += graph.vwgt[u];
         }
     }
     d
@@ -478,7 +479,7 @@ fn separator_pull_costs(graph: &Graph, labels: &[u8], v: usize) -> (i64, i64) {
     let mut cost_far_b: i64 = 0;
     for k in lo..hi {
         let u = graph.adjncy[k] as usize;
-        let wu = graph.vwgt[u] as i64;
+        let wu = graph.vwgt[u];
         match labels[u] {
             PART_A => cost_far_b += wu,
             PART_B => cost_far_a += wu,
@@ -493,7 +494,7 @@ pub fn separator_weight(graph: &Graph, labels: &[u8]) -> i64 {
     let mut s: i64 = 0;
     for (v, &l) in labels.iter().enumerate() {
         if l == PART_SEP {
-            s += graph.vwgt[v] as i64;
+            s += graph.vwgt[v];
         }
     }
     s
@@ -508,26 +509,26 @@ mod tests {
     use feral_ordering_core::CscPattern;
     use std::collections::BTreeSet;
 
-    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>) {
+    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<Idx>, Vec<Idx>) {
         let mut set: BTreeSet<(usize, usize)> = BTreeSet::new();
         for &(i, j) in triples {
             set.insert((i, j));
             set.insert((j, i));
         }
-        let mut cols: Vec<Vec<i32>> = vec![Vec::new(); n];
+        let mut cols: Vec<Vec<Idx>> = vec![Vec::new(); n];
         for &(r, c) in &set {
-            cols[c].push(r as i32);
+            cols[c].push(r as Idx);
         }
         for col in &mut cols {
             col.sort();
         }
-        let mut col_ptr: Vec<i32> = vec![0];
-        let mut row_idx: Vec<i32> = Vec::new();
+        let mut col_ptr: Vec<Idx> = vec![0];
+        let mut row_idx: Vec<Idx> = Vec::new();
         for col in &cols {
             for &r in col {
                 row_idx.push(r);
             }
-            col_ptr.push(row_idx.len() as i32);
+            col_ptr.push(row_idx.len() as Idx);
         }
         (col_ptr, row_idx)
     }
@@ -614,7 +615,7 @@ mod tests {
     #[test]
     fn refine_bisection_does_not_increase_cut() {
         let g = grid(8, 8);
-        let total: i64 = g.vwgt.iter().map(|&w| w as i64).sum();
+        let total: i64 = g.vwgt.iter().copied().sum();
         let mut rng = SplitMix::new(17);
         let mut labels = initial_bisect_ggp(&g, &mut rng, total / 2);
         let initial = cut_size(&g, &labels);
@@ -635,7 +636,7 @@ mod tests {
     #[test]
     fn refine_bisection_balance_respected() {
         let g = grid(6, 6);
-        let total: i64 = g.vwgt.iter().map(|&w| w as i64).sum();
+        let total: i64 = g.vwgt.iter().copied().sum();
         let mut rng = SplitMix::new(9);
         let mut labels = initial_bisect_ggp(&g, &mut rng, total / 2);
         let returned = refine_bisection(&g, &mut labels, 0.20, 5);
@@ -662,7 +663,7 @@ mod tests {
         let returned = refine_bisection(&g, &mut labels, 0.20, 10);
         let after = cut_size(&g, &labels);
         assert_eq!(returned, after, "I1: bookkeeping");
-        let total: i64 = g.vwgt.iter().map(|&w| w as i64).sum();
+        let total: i64 = g.vwgt.iter().copied().sum();
         let a = part_weight(&g, &labels, PART_A);
         let b = total - a;
         let max_side = ((1.20_f64) * total as f64 / 2.0).ceil() as i64;
@@ -851,7 +852,7 @@ mod tests {
         assert_eq!(cut_size(&g, &labels), 4, "construction: K_{{4,4}} 1-7");
         let returned = refine_bisection(&g, &mut labels, 0.50, 32);
         assert_eq!(returned, cut_size(&g, &labels), "I1: bookkeeping");
-        let total: i64 = g.vwgt.iter().map(|&w| w as i64).sum();
+        let total: i64 = g.vwgt.iter().copied().sum();
         let a = part_weight(&g, &labels, PART_A);
         let b = total - a;
         let max_side = ((1.50_f64) * total as f64 / 2.0).ceil() as i64;
@@ -907,8 +908,8 @@ mod tests {
     #[test]
     fn a9_single_vertex_returns_zero() {
         // n=1 — the n<2 short-circuit must fire.
-        let cp: Vec<i32> = vec![0, 0];
-        let ri: Vec<i32> = vec![];
+        let cp: Vec<Idx> = vec![0, 0];
+        let ri: Vec<Idx> = vec![];
         let pat = CscPattern::new(1, &cp, &ri).unwrap();
         let g = Graph::from_csc_pattern(&pat).unwrap();
         let mut labels = vec![PART_A];
@@ -920,8 +921,8 @@ mod tests {
     #[test]
     fn a10_empty_edge_set_no_moves() {
         // n=8, no edges, half A / half B. No gains → no moves.
-        let cp: Vec<i32> = vec![0; 9];
-        let ri: Vec<i32> = vec![];
+        let cp: Vec<Idx> = vec![0; 9];
+        let ri: Vec<Idx> = vec![];
         let pat = CscPattern::new(8, &cp, &ri).unwrap();
         let g = Graph::from_csc_pattern(&pat).unwrap();
         let mut labels: Vec<u8> = (0..8u8)
@@ -1133,7 +1134,7 @@ mod tests {
                 };
             }
             refine_separator_fm(&g, &mut labels, imb, 10);
-            let total: i64 = g.vwgt.iter().map(|&w| w as i64).sum();
+            let total: i64 = g.vwgt.iter().copied().sum();
             let max_side = ((1.0 + imb) * total as f64 / 2.0).ceil() as i64;
             let a = part_weight(&g, &labels, PART_A);
             let b = part_weight(&g, &labels, PART_B);

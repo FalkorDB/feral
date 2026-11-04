@@ -23,6 +23,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+use feral_ordering_core::Idx;
+
 // Modules are exercised only by `metis_order_full` once all
 // milestones land; until then, dead-code lint is suppressed at the
 // module root for internal helpers.
@@ -205,7 +207,7 @@ pub struct MetisStats {
 ///
 /// Thin wrapper over [`metis_order_full`] that discards the
 /// diagnostic stats. Returns a permutation `perm` (new-to-old).
-pub fn metis_order(pattern: &CscPattern<'_>) -> Result<Vec<i32>, OrderingError> {
+pub fn metis_order(pattern: &CscPattern<'_>) -> Result<Vec<Idx>, OrderingError> {
     metis_order_full(pattern, &MetisOptions::default()).map(|(perm, _, _)| perm)
 }
 
@@ -228,7 +230,7 @@ pub fn metis_order(pattern: &CscPattern<'_>) -> Result<Vec<i32>, OrderingError> 
 pub fn metis_order_full(
     pattern: &CscPattern<'_>,
     opts: &MetisOptions,
-) -> Result<(Vec<i32>, OrderingStats, MetisStats), OrderingError> {
+) -> Result<(Vec<Idx>, OrderingStats, MetisStats), OrderingError> {
     if pattern.col_ptr.len() != pattern.n + 1 {
         return Err(OrderingError::MalformedInput);
     }
@@ -267,7 +269,7 @@ pub fn metis_order_full(
         // columns at the end (in descending degree order — Davis &
         // Hager 2009 §3.2 ordering choice; ties broken by ascending
         // original index).
-        let mut perm: Vec<i32> = Vec::with_capacity(pattern.n);
+        let mut perm: Vec<Idx> = Vec::with_capacity(pattern.n);
         for &local in &sub_perm {
             let idx = local as usize;
             if idx >= sparse_to_orig.len() {
@@ -321,7 +323,7 @@ fn resolve_dense_threshold(n: usize, opts: &MetisOptions) -> usize {
 ///   order) and the `sparse_local → original` mapping. When the
 ///   dense set is empty, returns `(None, Vec::new(), Vec::new())` so
 ///   the caller can fast-path to the original pattern.
-type DenseSplit = (Option<(Vec<i32>, Vec<i32>, usize)>, Vec<i32>, Vec<i32>);
+type DenseSplit = (Option<(Vec<Idx>, Vec<Idx>, usize)>, Vec<Idx>, Vec<Idx>);
 fn split_dense_columns(
     pattern: &CscPattern<'_>,
     opts: &MetisOptions,
@@ -349,9 +351,9 @@ fn split_dense_columns(
     }
 
     // Collect dense columns.
-    let mut dense: Vec<i32> = (0..n)
+    let mut dense: Vec<Idx> = (0..n)
         .filter(|&c| deg[c] > thresh)
-        .map(|c| c as i32)
+        .map(|c| c as Idx)
         .collect();
 
     // No-op fast path: dense set empty.
@@ -376,12 +378,12 @@ fn split_dense_columns(
     for &c in &dense {
         is_dense[c as usize] = true;
     }
-    let mut sparse_to_orig: Vec<i32> = Vec::with_capacity(n - dense.len());
-    let mut orig_to_local: Vec<i32> = vec![-1; n];
+    let mut sparse_to_orig: Vec<Idx> = Vec::with_capacity(n - dense.len());
+    let mut orig_to_local: Vec<Idx> = vec![-1; n];
     for c in 0..n {
         if !is_dense[c] {
-            orig_to_local[c] = sparse_to_orig.len() as i32;
-            sparse_to_orig.push(c as i32);
+            orig_to_local[c] = sparse_to_orig.len() as Idx;
+            sparse_to_orig.push(c as Idx);
         }
     }
     let sub_n = sparse_to_orig.len();
@@ -390,8 +392,8 @@ fn split_dense_columns(
     // downstream consumers (Graph::from_csc_pattern, AMD leaf) see a
     // well-formed pattern. Row indices stay sorted because we walk
     // each original column in ascending row order.
-    let mut col_ptr: Vec<i32> = Vec::with_capacity(sub_n + 1);
-    let mut row_idx: Vec<i32> = Vec::new();
+    let mut col_ptr: Vec<Idx> = Vec::with_capacity(sub_n + 1);
+    let mut row_idx: Vec<Idx> = Vec::new();
     col_ptr.push(0);
     for &orig in &sparse_to_orig {
         let c = orig as usize;
@@ -422,7 +424,7 @@ fn split_dense_columns(
         if !diag_inserted {
             row_idx.push(local_c);
         }
-        col_ptr.push(row_idx.len() as i32);
+        col_ptr.push(row_idx.len() as Idx);
     }
 
     Ok((Some((col_ptr, row_idx, sub_n)), dense, sparse_to_orig))
@@ -432,7 +434,7 @@ fn split_dense_columns(
 mod tests {
     use super::*;
 
-    fn trivial_pattern() -> (Vec<i32>, Vec<i32>) {
+    fn trivial_pattern() -> (Vec<Idx>, Vec<Idx>) {
         // Diagonal n=3: col_ptr=[0,1,2,3], row_idx=[0,1,2]
         (vec![0, 1, 2, 3], vec![0, 1, 2])
     }

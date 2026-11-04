@@ -25,6 +25,7 @@
 #![allow(dead_code)]
 
 use super::workspace::{clear_flag, flip, Workspace, NONE};
+use crate::Idx;
 use crate::OrderingError;
 
 /// Flop-counter deltas produced by a single elimination step.
@@ -59,7 +60,7 @@ impl StepFlops {
 pub fn select_pivot(ws: &mut Workspace) -> Option<usize> {
     let n = ws.n;
     let mut deg = ws.mindeg;
-    let mut me_signed: i32 = NONE;
+    let mut me_signed: Idx = NONE;
     while deg < n {
         let h = ws.head[deg];
         if h != NONE {
@@ -115,14 +116,14 @@ pub fn select_pivot(ws: &mut Workspace) -> Option<usize> {
 pub fn create_element(
     ws: &mut Workspace,
     me: usize,
-) -> Result<(usize, usize, i32, usize), OrderingError> {
+) -> Result<(usize, usize, Idx, usize), OrderingError> {
     let elenme = ws.elen[me];
     let nvpiv = ws.nv[me];
     ws.nel += nvpiv as usize;
     ws.nv[me] = -nvpiv;
     let mut degme: usize = 0;
     let pme1: usize;
-    let pme2: i32;
+    let pme2: Idx;
 
     if elenme == 0 {
         // In-place: me has no elements in its list — just variables.
@@ -140,7 +141,7 @@ pub fn create_element(
                 degme += nvi as usize;
                 ws.nv[i] = -nvi;
                 pme2_s += 1;
-                ws.iw[pme2_s as usize] = i as i32;
+                ws.iw[pme2_s as usize] = i as Idx;
                 // Unlink i from its degree list.
                 let ilast = ws.last[i];
                 let inext = ws.next[i];
@@ -189,13 +190,13 @@ pub fn create_element(
                         // amd.rs:289-338). Save partial state so
                         // the surviving elements can be compacted
                         // down, then restore local cursors.
-                        ws.pe[me] = p as i32;
-                        ws.len[me] -= knt1 as i32;
+                        ws.pe[me] = p as Idx;
+                        ws.len[me] -= knt1 as Idx;
                         if ws.len[me] == 0 {
                             ws.pe[me] = NONE;
                         }
-                        ws.pe[e] = pj as i32;
-                        ws.len[e] = (ln - knt2) as i32;
+                        ws.pe[e] = pj as Idx;
+                        ws.len[e] = (ln - knt2) as Idx;
                         if ws.len[e] == 0 {
                             ws.pe[e] = NONE;
                         }
@@ -209,7 +210,7 @@ pub fn create_element(
                             if pn >= 0 {
                                 let pn_u = pn as usize;
                                 ws.pe[j] = ws.iw[pn_u];
-                                ws.iw[pn_u] = flip(j as i32);
+                                ws.iw[pn_u] = flip(j as Idx);
                             }
                         }
                         // Sweep [0, pme1_rw), reconstructing every
@@ -223,7 +224,7 @@ pub fn create_element(
                             if j_marker >= 0 {
                                 let j = j_marker as usize;
                                 ws.iw[pdst] = ws.pe[j];
-                                ws.pe[j] = pdst as i32;
+                                ws.pe[j] = pdst as Idx;
                                 pdst += 1;
                                 let lenj = ws.len[j] as usize;
                                 if lenj > 0 {
@@ -247,7 +248,7 @@ pub fn create_element(
                     }
                     degme += nvi as usize;
                     ws.nv[i] = -nvi;
-                    ws.iw[ws.pfree] = i as i32;
+                    ws.iw[ws.pfree] = i as Idx;
                     ws.pfree += 1;
                     // Unlink i from its degree list.
                     let ilast = ws.last[i];
@@ -265,26 +266,26 @@ pub fn create_element(
             // Standard absorption (amd.rs:355-358): every element e
             // that was in me's list is now absorbed by me.
             if e != me {
-                ws.pe[e] = flip(me as i32);
+                ws.pe[e] = flip(me as Idx);
                 ws.w[e] = 0;
             }
         }
         pme1 = pme1_rw;
-        pme2 = (ws.pfree - 1) as i32;
+        pme2 = (ws.pfree - 1) as Idx;
     }
 
-    ws.degree[me] = degme as i32;
-    ws.pe[me] = pme1 as i32;
-    ws.len[me] = pme2 - pme1 as i32 + 1;
-    ws.elen[me] = flip(nvpiv + degme as i32);
+    ws.degree[me] = degme as Idx;
+    ws.pe[me] = pme1 as Idx;
+    ws.len[me] = pme2 - pme1 as Idx + 1;
+    ws.elen[me] = flip(nvpiv + degme as Idx);
     ws.wflg = clear_flag(ws.wflg, ws.wbig, &mut ws.w);
 
     // Convert the inclusive `pme2` (which is `pme1 - 1` when the
     // pivot's variable list ended up empty — every neighbour was
     // already absorbed) to an exclusive end so downstream loops can
     // use a `usize` half-open range without the wrap-around bug
-    // `(-1i32) as usize == usize::MAX`.
-    let pme2_excl: usize = if pme2 < pme1 as i32 {
+    // `(-1 as Idx) as usize == usize::MAX`.
+    let pme2_excl: usize = if pme2 < pme1 as Idx {
         pme1
     } else {
         (pme2 + 1) as usize
@@ -334,9 +335,9 @@ pub fn finalize_step(
     me: usize,
     pme1: usize,
     pme2_excl: usize,
-    nvpiv: i32,
+    nvpiv: Idx,
     degme: usize,
-    elenme: i32,
+    elenme: Idx,
     aggressive: bool,
 ) -> StepFlops {
     let mut degme = degme;
@@ -388,13 +389,13 @@ pub fn finalize_step(
                     let dext = we - ws.wflg;
                     if dext > 0 {
                         deg += dext as usize;
-                        ws.iw[pn] = e as i32;
+                        ws.iw[pn] = e as Idx;
                         pn += 1;
                         hash = hash.wrapping_add(e);
                     } else {
                         // Aggressive absorption: dead element folded
                         // into me right here (faer amd.rs:404-407).
-                        ws.pe[e] = flip(me as i32);
+                        ws.pe[e] = flip(me as Idx);
                         ws.w[e] = 0;
                     }
                 }
@@ -416,7 +417,7 @@ pub fn finalize_step(
                     );
                     let dext = (we - ws.wflg) as usize;
                     deg += dext;
-                    ws.iw[pn] = e as i32;
+                    ws.iw[pn] = e as Idx;
                     pn += 1;
                     hash = hash.wrapping_add(e);
                 }
@@ -425,7 +426,7 @@ pub fn finalize_step(
 
         // Record number-of-elements + 1 (the +1 reserves the slot
         // for `me` which we insert at p1 below).
-        ws.elen[i] = (pn - p1 + 1) as i32;
+        ws.elen[i] = (pn - p1 + 1) as Idx;
         let p3 = pn;
         let p4 = p1 + ws.len[i] as usize;
         // Variable sub-pass.
@@ -434,7 +435,7 @@ pub fn finalize_step(
             let nvj = ws.nv[j];
             if nvj > 0 {
                 deg += nvj as usize;
-                ws.iw[pn] = j as i32;
+                ws.iw[pn] = j as Idx;
                 pn += 1;
                 hash = hash.wrapping_add(j);
             }
@@ -445,7 +446,7 @@ pub fn finalize_step(
             // no surviving outside variables, so it will pivot
             // concurrently with me. Fold its supervariable count
             // into nvpiv / nel and drop it from degme.
-            ws.pe[i] = flip(me as i32);
+            ws.pe[i] = flip(me as Idx);
             let nvi = -ws.nv[i];
             debug_assert!(nvi >= 0);
             degme -= nvi as usize;
@@ -455,7 +456,7 @@ pub fn finalize_step(
             ws.elen[i] = NONE;
             ws.n_mass_elim += 1;
         } else {
-            ws.degree[i] = ws.degree[i].min(deg as i32);
+            ws.degree[i] = ws.degree[i].min(deg as Idx);
             // Swap-dance to put `me` at the head of i's element list.
             if p1 != pn {
                 ws.iw[pn] = ws.iw[p3];
@@ -463,8 +464,8 @@ pub fn finalize_step(
             if p3 != p1 {
                 ws.iw[p3] = ws.iw[p1];
             }
-            ws.iw[p1] = me as i32;
-            ws.len[i] = (pn - p1 + 1) as i32;
+            ws.iw[p1] = me as Idx;
+            ws.len[i] = (pn - p1 + 1) as Idx;
 
             // Insert i into a hash bucket threaded through
             // head/next/last via sign-bit encoding (faer
@@ -481,18 +482,18 @@ pub fn finalize_step(
             let j = ws.head[h];
             if j <= NONE {
                 ws.next[i] = flip(j);
-                ws.head[h] = flip(i as i32);
+                ws.head[h] = flip(i as Idx);
             } else {
                 ws.next[i] = ws.last[j as usize];
-                ws.last[j as usize] = i as i32;
+                ws.last[j as usize] = i as Idx;
             }
-            ws.last[i] = h as i32;
+            ws.last[i] = h as Idx;
         }
     }
 
     // Step bookkeeping (amd.rs:463-466). degme may have been reduced
     // by mass elimination above.
-    let degme_i32 = degme as i32;
+    let degme_i32 = degme as Idx;
     ws.degree[me] = degme_i32;
     if degme_i32 > ws.lemax {
         ws.lemax = degme_i32;
@@ -517,7 +518,7 @@ pub fn finalize_step(
         }
         let h = ws.last[i_anchor] as usize;
         let j_head = ws.head[h];
-        let mut i: i32 = if j_head == NONE {
+        let mut i: Idx = if j_head == NONE {
             NONE
         } else if j_head < NONE {
             // Bucket was flip-encoded: flip(j_head) is the head.
@@ -591,23 +592,23 @@ pub fn finalize_step(
             }
             let inext = ws.head[d];
             if inext != NONE {
-                ws.last[inext as usize] = i as i32;
+                ws.last[inext as usize] = i as Idx;
             }
             ws.next[i] = inext;
             ws.last[i] = NONE;
-            ws.head[d] = i as i32;
+            ws.head[d] = i as Idx;
             if d < ws.mindeg {
                 ws.mindeg = d;
             }
-            ws.degree[i] = d as i32;
-            ws.iw[p_write] = i as i32;
+            ws.degree[i] = d as Idx;
+            ws.iw[p_write] = i as Idx;
             p_write += 1;
         }
     }
 
     // Me bookkeeping (amd.rs:538-546).
     ws.nv[me] = nvpiv;
-    ws.len[me] = (p_write as i32) - pme1 as i32;
+    ws.len[me] = (p_write as Idx) - pme1 as Idx;
     if ws.len[me] == 0 {
         ws.pe[me] = NONE;
         ws.w[me] = 0;
@@ -676,10 +677,10 @@ fn amf_wf_combine(wf4: i64, nvi: i64, wf3: i64) -> i64 {
     wf4 + 2 * nvi * wf3
 }
 
-/// Saturation cap used when quantizing the AMF RMF score into `i32`.
-/// `i32::MAX - 1` matches MUMPS `idummy = huge(idummy) - 1`
+/// Saturation cap used when quantizing the AMF RMF score into `Idx`.
+/// `Idx::MAX - 1` matches MUMPS `idummy = huge(idummy) - 1`
 /// (`ana_orderings.F:4230`).
-const AMF_DUMMY_I32: i32 = i32::MAX - 1;
+const AMF_DUMMY_I32: Idx = Idx::MAX - 1;
 
 /// AMF analogue of [`select_pivot`]. Linear-scans coarse buckets
 /// (`idx > n`) for the entry with the smallest exact score; takes the
@@ -749,7 +750,7 @@ pub fn select_pivot_amf(ws: &mut Workspace) -> Option<usize> {
 pub fn create_element_amf(
     ws: &mut Workspace,
     me: usize,
-) -> Result<(usize, usize, i32, usize), OrderingError> {
+) -> Result<(usize, usize, Idx, usize), OrderingError> {
     let n = ws.n;
     let elenme = ws.elen[me];
     let nvpiv = ws.nv[me];
@@ -757,7 +758,7 @@ pub fn create_element_amf(
     ws.nv[me] = -nvpiv;
     let mut degme: usize = 0;
     let pme1: usize;
-    let pme2: i32;
+    let pme2: Idx;
 
     if elenme == 0 {
         let pme1_s = ws.pe[me];
@@ -772,7 +773,7 @@ pub fn create_element_amf(
                 degme += nvi as usize;
                 ws.nv[i] = -nvi;
                 pme2_s += 1;
-                ws.iw[pme2_s as usize] = i as i32;
+                ws.iw[pme2_s as usize] = i as Idx;
                 let ilast = ws.last[i];
                 let inext = ws.next[i];
                 if inext != NONE {
@@ -812,13 +813,13 @@ pub fn create_element_amf(
                 let nvi = ws.nv[i];
                 if nvi > 0 {
                     if ws.pfree >= ws.iwlen {
-                        ws.pe[me] = p as i32;
-                        ws.len[me] -= knt1 as i32;
+                        ws.pe[me] = p as Idx;
+                        ws.len[me] -= knt1 as Idx;
                         if ws.len[me] == 0 {
                             ws.pe[me] = NONE;
                         }
-                        ws.pe[e] = pj as i32;
-                        ws.len[e] = (ln - knt2) as i32;
+                        ws.pe[e] = pj as Idx;
+                        ws.len[e] = (ln - knt2) as Idx;
                         if ws.len[e] == 0 {
                             ws.pe[e] = NONE;
                         }
@@ -828,7 +829,7 @@ pub fn create_element_amf(
                             if pn >= 0 {
                                 let pn_u = pn as usize;
                                 ws.pe[j] = ws.iw[pn_u];
-                                ws.iw[pn_u] = flip(j as i32);
+                                ws.iw[pn_u] = flip(j as Idx);
                             }
                         }
                         let mut psrc = 0usize;
@@ -840,7 +841,7 @@ pub fn create_element_amf(
                             if j_marker >= 0 {
                                 let j = j_marker as usize;
                                 ws.iw[pdst] = ws.pe[j];
-                                ws.pe[j] = pdst as i32;
+                                ws.pe[j] = pdst as Idx;
                                 pdst += 1;
                                 let lenj = ws.len[j] as usize;
                                 if lenj > 0 {
@@ -860,7 +861,7 @@ pub fn create_element_amf(
                     }
                     degme += nvi as usize;
                     ws.nv[i] = -nvi;
-                    ws.iw[ws.pfree] = i as i32;
+                    ws.iw[ws.pfree] = i as Idx;
                     ws.pfree += 1;
                     let ilast = ws.last[i];
                     let inext = ws.next[i];
@@ -876,21 +877,21 @@ pub fn create_element_amf(
                 }
             }
             if e != me {
-                ws.pe[e] = flip(me as i32);
+                ws.pe[e] = flip(me as Idx);
                 ws.w[e] = 0;
             }
         }
         pme1 = pme1_rw;
-        pme2 = (ws.pfree - 1) as i32;
+        pme2 = (ws.pfree - 1) as Idx;
     }
 
-    ws.degree[me] = degme as i32;
-    ws.pe[me] = pme1 as i32;
-    ws.len[me] = pme2 - pme1 as i32 + 1;
-    ws.elen[me] = flip(nvpiv + degme as i32);
+    ws.degree[me] = degme as Idx;
+    ws.pe[me] = pme1 as Idx;
+    ws.len[me] = pme2 - pme1 as Idx + 1;
+    ws.elen[me] = flip(nvpiv + degme as Idx);
     ws.wflg = clear_flag(ws.wflg, ws.wbig, &mut ws.w);
 
-    let pme2_excl: usize = if pme2 < pme1 as i32 {
+    let pme2_excl: usize = if pme2 < pme1 as Idx {
         pme1
     } else {
         (pme2 + 1) as usize
@@ -917,7 +918,7 @@ pub fn create_element_amf(
 ///    AMF score is reset.
 /// 5. Supervariable merge takes `wf[i] = max(wf[i], wf[j])`.
 /// 6. Re-insertion uses the saturated/regular RMF formula with
-///    `dummy = i32::MAX - 1`, quantizes via `bucket(wf[i], n)`, and
+///    `dummy = Idx::MAX - 1`, quantizes via `bucket(wf[i], n)`, and
 ///    threads through `head` of length `2 * n + 2`.
 ///
 /// Reference: `ana_orderings.F:4660-5025`.
@@ -927,9 +928,9 @@ pub fn finalize_step_amf(
     me: usize,
     pme1: usize,
     pme2_excl: usize,
-    nvpiv: i32,
+    nvpiv: Idx,
     degme: usize,
-    elenme: i32,
+    elenme: Idx,
     aggressive: bool,
 ) -> StepFlops {
     let n = ws.n;
@@ -1008,16 +1009,16 @@ pub fn finalize_step_amf(
                         if ws.wf[e] == 0 {
                             // First touch this iter: cache the surface
                             // contribution dext*(2*deg(e) - dext - 1).
-                            ws.wf[e] = amf_wf_surface(dext as i64, ws.degree[e] as i64);
+                            ws.wf[e] = amf_wf_surface(dext, ws.degree[e]);
                         }
                         wf4 += ws.wf[e];
                         deg += dext as usize;
-                        ws.iw[pn] = e as i32;
+                        ws.iw[pn] = e as Idx;
                         pn += 1;
                         hash = hash.wrapping_add(e);
                     } else {
                         // Aggressive absorption.
-                        ws.pe[e] = flip(me as i32);
+                        ws.pe[e] = flip(me as Idx);
                         ws.w[e] = 0;
                     }
                 }
@@ -1041,18 +1042,18 @@ pub fn finalize_step_amf(
                     // surface (O21) — recompute on the latter is benign (same
                     // value). See the Pass-1 reset comment above.
                     if ws.wf[e] == 0 {
-                        ws.wf[e] = amf_wf_surface(dext as i64, ws.degree[e] as i64);
+                        ws.wf[e] = amf_wf_surface(dext, ws.degree[e]);
                     }
                     wf4 += ws.wf[e];
                     deg += dext as usize;
-                    ws.iw[pn] = e as i32;
+                    ws.iw[pn] = e as Idx;
                     pn += 1;
                     hash = hash.wrapping_add(e);
                 }
             }
         }
 
-        ws.elen[i] = (pn - p1 + 1) as i32;
+        ws.elen[i] = (pn - p1 + 1) as Idx;
         let p3 = pn;
         let p4 = p1 + ws.len[i] as usize;
         // Variable sub-pass.
@@ -1061,8 +1062,8 @@ pub fn finalize_step_amf(
             let nvj = ws.nv[j];
             if nvj > 0 {
                 deg += nvj as usize;
-                wf3 += nvj as i64;
-                ws.iw[pn] = j as i32;
+                wf3 += nvj;
+                ws.iw[pn] = j as Idx;
                 pn += 1;
                 hash = hash.wrapping_add(j);
             }
@@ -1071,7 +1072,7 @@ pub fn finalize_step_amf(
         if ws.elen[i] == 1 && p3 == pn {
             // Mass elimination (equivalent to MUMPS DEG==0 in
             // aggressive / non-halo mode).
-            ws.pe[i] = flip(me as i32);
+            ws.pe[i] = flip(me as Idx);
             let nvi_sv = -ws.nv[i];
             debug_assert!(nvi_sv >= 0);
             degme -= nvi_sv as usize;
@@ -1084,15 +1085,15 @@ pub fn finalize_step_amf(
             // Loose-degree special case: if the prior degree estimate
             // is already tighter, keep it but the WF accumulator is
             // not subtraction-safe — zero it.
-            if ws.degree[i] < deg as i32 {
+            if ws.degree[i] < deg as Idx {
                 wf3 = 0;
                 wf4 = 0;
             } else {
-                ws.degree[i] = deg as i32;
+                ws.degree[i] = deg as Idx;
             }
             // wf[i] = wf4 + 2 * nvi * wf3 (Amestoy 1999 eq. for B3
             // contribution; see ana_orderings.F:4810).
-            ws.wf[i] = amf_wf_combine(wf4, nvi as i64, wf3);
+            ws.wf[i] = amf_wf_combine(wf4, nvi, wf3);
 
             // Swap-dance to put `me` at the head of i's element list.
             if p1 != pn {
@@ -1101,8 +1102,8 @@ pub fn finalize_step_amf(
             if p3 != p1 {
                 ws.iw[p3] = ws.iw[p1];
             }
-            ws.iw[p1] = me as i32;
-            ws.len[i] = (pn - p1 + 1) as i32;
+            ws.iw[p1] = me as Idx;
+            ws.len[i] = (pn - p1 + 1) as Idx;
 
             // Hash-bucket insertion (sign-bit encoding identical to
             // AMD; head reuse is safe because hash mod n falls in
@@ -1111,16 +1112,16 @@ pub fn finalize_step_amf(
             let j = ws.head[h];
             if j <= NONE {
                 ws.next[i] = flip(j);
-                ws.head[h] = flip(i as i32);
+                ws.head[h] = flip(i as Idx);
             } else {
                 ws.next[i] = ws.last[j as usize];
-                ws.last[j as usize] = i as i32;
+                ws.last[j as usize] = i as Idx;
             }
-            ws.last[i] = h as i32;
+            ws.last[i] = h as Idx;
         }
     }
 
-    let degme_i32 = degme as i32;
+    let degme_i32 = degme as Idx;
     ws.degree[me] = degme_i32;
     if degme_i32 > ws.lemax {
         ws.lemax = degme_i32;
@@ -1137,7 +1138,7 @@ pub fn finalize_step_amf(
         }
         let h = ws.last[i_anchor] as usize;
         let j_head = ws.head[h];
-        let mut i: i32 = if j_head == NONE {
+        let mut i: Idx = if j_head == NONE {
             NONE
         } else if j_head < NONE {
             ws.head[h] = NONE;
@@ -1209,7 +1210,7 @@ pub fn finalize_step_amf(
                 // Saturated branch. RMF1 uses original DEG.
                 let deg_f = deg_i as f64;
                 let rmf1 = deg_f * (deg_f - 1.0 + 2.0 * degme_i as f64) - ws.wf[i] as f64;
-                let new_deg = (nleft as i32) - nvi_i;
+                let new_deg = (nleft as Idx) - nvi_i;
                 ws.degree[i] = new_deg;
                 let nd = new_deg as f64;
                 let rmf_new =
@@ -1221,10 +1222,10 @@ pub fn finalize_step_amf(
                 deg_f * (deg_f - 1.0 + 2.0 * degme_i as f64) - ws.wf[i] as f64
             };
             let rmf = rmf / (nvi_i as f64 + 1.0);
-            let qscore: i32 = if rmf < dummy_f {
-                rmf.round() as i32
+            let qscore: Idx = if rmf < dummy_f {
+                rmf.round() as Idx
             } else if rmf / n_f < dummy_f {
-                (rmf / n_f).round() as i32
+                (rmf / n_f).round() as Idx
             } else {
                 AMF_DUMMY_I32
             };
@@ -1233,22 +1234,22 @@ pub fn finalize_step_amf(
             let d = amf_bucket_of(ws.wf[i], n);
             let inext = ws.head[d];
             if inext != NONE {
-                ws.last[inext as usize] = i as i32;
+                ws.last[inext as usize] = i as Idx;
             }
             ws.next[i] = inext;
             ws.last[i] = NONE;
-            ws.head[d] = i as i32;
+            ws.head[d] = i as Idx;
             if d < ws.mindeg {
                 ws.mindeg = d;
             }
-            ws.iw[p_write] = i as i32;
+            ws.iw[p_write] = i as Idx;
             p_write += 1;
         }
     }
 
     // Me bookkeeping (same as AMD).
     ws.nv[me] = nvpiv;
-    ws.len[me] = (p_write as i32) - pme1 as i32;
+    ws.len[me] = (p_write as Idx) - pme1 as Idx;
     if ws.len[me] == 0 {
         ws.pe[me] = NONE;
         ws.w[me] = 0;
@@ -1358,7 +1359,7 @@ pub fn run_elimination(ws: &mut Workspace, aggressive: bool) -> Result<StepFlops
 ///
 /// Returns a permutation `perm` of length `n` where `perm[k]` is the
 /// column of the original matrix to be eliminated at step `k`.
-pub fn finalize_permutation(ws: &mut Workspace) -> Vec<i32> {
+pub fn finalize_permutation(ws: &mut Workspace) -> Vec<Idx> {
     let n = ws.n;
     if n == 0 {
         return Vec::new();
@@ -1383,7 +1384,7 @@ pub fn finalize_permutation(ws: &mut Workspace) -> Vec<i32> {
             while ws.nv[j] == 0 {
                 j = ws.pe[j] as usize;
             }
-            let e = j as i32;
+            let e = j as Idx;
             let mut j = i;
             while ws.nv[j] == 0 {
                 let jnext = ws.pe[j];
@@ -1403,7 +1404,7 @@ pub fn finalize_permutation(ws: &mut Workspace) -> Vec<i32> {
     for e in 0..n {
         let k = ws.w[e];
         if k != NONE {
-            ws.head[k as usize] = e as i32;
+            ws.head[k as usize] = e as Idx;
         }
     }
 
@@ -1411,7 +1412,7 @@ pub fn finalize_permutation(ws: &mut Workspace) -> Vec<i32> {
     for x in ws.next.iter_mut() {
         *x = NONE;
     }
-    let mut nel: i32 = 0;
+    let mut nel: Idx = 0;
     for &e in ws.head.iter() {
         if e == NONE {
             break;
@@ -1437,9 +1438,9 @@ pub fn finalize_permutation(ws: &mut Workspace) -> Vec<i32> {
     }
 
     // Step 7: emit perm.
-    let mut perm = vec![0i32; n];
+    let mut perm = vec![0 as Idx; n];
     for i in 0..n {
-        perm[ws.next[i] as usize] = i as i32;
+        perm[ws.next[i] as usize] = i as Idx;
     }
     perm
 }
@@ -1465,7 +1466,7 @@ fn assembly_tree_postorder(ws: &mut Workspace) {
             if parent >= 0 && (parent as usize) < n {
                 let pu = parent as usize;
                 ws.next[j] = ws.head[pu];
-                ws.head[pu] = j as i32;
+                ws.head[pu] = j as Idx;
             }
         }
     }
@@ -1475,10 +1476,10 @@ fn assembly_tree_postorder(ws: &mut Workspace) {
     for i in 0..n {
         if ws.nv[i] > 0 && ws.head[i] != NONE {
             let child0 = ws.head[i];
-            let mut fprev: i32 = NONE;
-            let mut bigfprev: i32 = NONE;
-            let mut bigf: i32 = NONE;
-            let mut maxfrsize: i32 = NONE;
+            let mut fprev: Idx = NONE;
+            let mut bigfprev: Idx = NONE;
+            let mut bigf: Idx = NONE;
+            let mut maxfrsize: Idx = NONE;
             let mut f = child0;
             while f != NONE {
                 let fu = f as usize;
@@ -1522,7 +1523,7 @@ fn assembly_tree_postorder(ws: &mut Workspace) {
 fn post_tree_dfs(ws: &mut Workspace, root: usize, k_start: usize) -> usize {
     let mut k = k_start;
     let mut top: usize = 1;
-    ws.last[0] = root as i32;
+    ws.last[0] = root as Idx;
     while top > 0 {
         let i = ws.last[top - 1] as usize;
         let child0 = ws.head[i];
@@ -1552,7 +1553,7 @@ fn post_tree_dfs(ws: &mut Workspace, root: usize, k_start: usize) -> usize {
             ws.head[i] = NONE; // mark visited
         } else {
             top -= 1;
-            ws.w[i] = k as i32;
+            ws.w[i] = k as Idx;
             k += 1;
         }
     }
@@ -1565,7 +1566,7 @@ mod tests {
     use crate::quotient_graph::WorkspaceOptions;
     use crate::CscPattern;
 
-    fn ws_for<'a>(n: usize, cp: &'a [i32], ri: &'a [i32]) -> Workspace {
+    fn ws_for<'a>(n: usize, cp: &'a [Idx], ri: &'a [Idx]) -> Workspace {
         let p = CscPattern::new(n, cp, ri).unwrap();
         Workspace::new(&p, &WorkspaceOptions::default()).unwrap()
     }
@@ -1644,7 +1645,7 @@ mod tests {
         // The new element's var list contains {hub} = {0}.
         assert_eq!(pme2_excl - pme1, 1);
         assert_eq!(ws.iw[pme1], 0);
-        assert_eq!(ws.pe[4], pme1 as i32);
+        assert_eq!(ws.pe[4], pme1 as Idx);
         assert_eq!(ws.len[4], 1);
         assert_eq!(ws.elen[4], flip(1 + 1), "flip(nvpiv + degme)");
         assert_eq!(ws.nv[4], -1, "pivot marker");
@@ -1725,17 +1726,17 @@ mod tests {
     #[test]
     fn run_elimination_tridiag_10() {
         let n = 10usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         for j in 0..n {
             if j > 0 {
-                ri.push((j - 1) as i32);
+                ri.push((j - 1) as Idx);
             }
-            ri.push(j as i32);
+            ri.push(j as Idx);
             if j + 1 < n {
-                ri.push((j + 1) as i32);
+                ri.push((j + 1) as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1753,8 +1754,8 @@ mod tests {
         let m = 7usize;
         let n = 7usize;
         let total = m * n;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         use std::collections::BTreeSet;
         let idx = |r: usize, c: usize| r * n + c;
         for c in 0..total {
@@ -1775,9 +1776,9 @@ mod tests {
                 neigh.insert(idx(r0, c0 + 1));
             }
             for &r in &neigh {
-                ri.push(r as i32);
+                ri.push(r as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(total, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1792,15 +1793,15 @@ mod tests {
     fn run_elimination_band_20_3_triggers_gc() {
         let n = 20usize;
         let b = 3usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         for j in 0..n {
             let lo = j.saturating_sub(b);
             let hi = (j + b + 1).min(n);
             for r in lo..hi {
-                ri.push(r as i32);
+                ri.push(r as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1818,17 +1819,17 @@ mod tests {
     #[test]
     fn run_elimination_arrow_200() {
         let n = 200usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         ri.push(0);
         for r in 1..n {
-            ri.push(r as i32);
+            ri.push(r as Idx);
         }
-        cp.push(ri.len() as i32);
+        cp.push(ri.len() as Idx);
         for j in 1..n {
             ri.push(0);
-            ri.push(j as i32);
-            cp.push(ri.len() as i32);
+            ri.push(j as Idx);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1844,17 +1845,17 @@ mod tests {
     #[test]
     fn arrow_200_first_pivot_smoke() {
         let n = 200usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         ri.push(0);
         for r in 1..n {
-            ri.push(r as i32);
+            ri.push(r as Idx);
         }
-        cp.push(ri.len() as i32);
+        cp.push(ri.len() as Idx);
         for j in 1..n {
             ri.push(0);
-            ri.push(j as i32);
-            cp.push(ri.len() as i32);
+            ri.push(j as Idx);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1869,7 +1870,7 @@ mod tests {
         assert_eq!(ws.nel, 2, "1 deferred hub + 1 pivot");
     }
 
-    fn is_permutation(perm: &[i32]) -> bool {
+    fn is_permutation(perm: &[Idx]) -> bool {
         let n = perm.len();
         let mut seen = vec![false; n];
         for &p in perm {
@@ -1920,17 +1921,17 @@ mod tests {
     #[test]
     fn permutation_tridiag_10() {
         let n = 10usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         for j in 0..n {
             if j > 0 {
-                ri.push((j - 1) as i32);
+                ri.push((j - 1) as Idx);
             }
-            ri.push(j as i32);
+            ri.push(j as Idx);
             if j + 1 < n {
-                ri.push((j + 1) as i32);
+                ri.push((j + 1) as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1946,17 +1947,17 @@ mod tests {
     #[test]
     fn permutation_arrow_200_hub_deferred() {
         let n = 200usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         ri.push(0);
         for r in 1..n {
-            ri.push(r as i32);
+            ri.push(r as Idx);
         }
-        cp.push(ri.len() as i32);
+        cp.push(ri.len() as Idx);
         for j in 1..n {
             ri.push(0);
-            ri.push(j as i32);
-            cp.push(ri.len() as i32);
+            ri.push(j as Idx);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -1977,8 +1978,8 @@ mod tests {
         let m = 7usize;
         let n = 7usize;
         let total = m * n;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         use std::collections::BTreeSet;
         let idx = |r: usize, c: usize| r * n + c;
         for c in 0..total {
@@ -1999,9 +2000,9 @@ mod tests {
                 neigh.insert(idx(r0, c0 + 1));
             }
             for &r in &neigh {
-                ri.push(r as i32);
+                ri.push(r as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(total, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -2017,15 +2018,15 @@ mod tests {
     fn permutation_band_20_3() {
         let n = 20usize;
         let b = 3usize;
-        let mut cp: Vec<i32> = vec![0];
-        let mut ri: Vec<i32> = Vec::new();
+        let mut cp: Vec<Idx> = vec![0];
+        let mut ri: Vec<Idx> = Vec::new();
         for j in 0..n {
             let lo = j.saturating_sub(b);
             let hi = (j + b + 1).min(n);
             for r in lo..hi {
-                ri.push(r as i32);
+                ri.push(r as Idx);
             }
-            cp.push(ri.len() as i32);
+            cp.push(ri.len() as Idx);
         }
         let p = CscPattern::new(n, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
@@ -2038,8 +2039,8 @@ mod tests {
     /// Empty pattern (n == 0) round-trips to an empty permutation.
     #[test]
     fn permutation_empty() {
-        let cp = [0i32];
-        let ri: [i32; 0] = [];
+        let cp = [0 as Idx];
+        let ri: [Idx; 0] = [];
         let p = CscPattern::new(0, &cp, &ri).unwrap();
         let mut ws = Workspace::new(&p, &WorkspaceOptions::default()).unwrap();
         run_elimination(&mut ws, true).unwrap();

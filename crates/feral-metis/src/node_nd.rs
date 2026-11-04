@@ -22,6 +22,7 @@ use crate::initial_partition::{initial_bisect_bfs, initial_bisect_ggp, PART_A, P
 use crate::rng::SplitMix;
 use crate::separator::construct_separator;
 use crate::{MetisOptions, MetisStats};
+use feral_ordering_core::Idx;
 use feral_ordering_core::{CscPattern, OrderingError};
 
 /// Entry point. Produces a permutation `perm` where `perm[i]` is the
@@ -30,10 +31,10 @@ pub(crate) fn nd_order(
     pattern: &CscPattern<'_>,
     opts: &MetisOptions,
     stats: &mut MetisStats,
-) -> Result<Vec<i32>, OrderingError> {
+) -> Result<Vec<Idx>, OrderingError> {
     let graph = Graph::from_csc_pattern(pattern)?;
     let n = graph.nvtxs as usize;
-    let mut iperm: Vec<i32> = vec![-1; n];
+    let mut iperm: Vec<Idx> = vec![-1; n];
     let mut rng = SplitMix::new(opts.seed);
 
     // Top-level: walk connected components.
@@ -42,7 +43,7 @@ pub(crate) fn nd_order(
 
     let mut offset: usize = 0;
     for c in 0..ncc {
-        let (sub, vtx_map) = extract_by_label(&graph, &cc_label, c as i32);
+        let (sub, vtx_map) = extract_by_label(&graph, &cc_label, c as Idx);
         let count = sub.nvtxs as usize;
         if count > 0 {
             recurse(&sub, &vtx_map, offset, &mut iperm, opts, &mut rng, stats)?;
@@ -57,9 +58,9 @@ pub(crate) fn nd_order(
 
 fn recurse(
     subgraph: &Graph,
-    vtx_map: &[i32],
+    vtx_map: &[Idx],
     offset: usize,
-    iperm: &mut [i32],
+    iperm: &mut [Idx],
     opts: &MetisOptions,
     rng: &mut SplitMix,
     stats: &mut MetisStats,
@@ -69,7 +70,7 @@ fn recurse(
         return Ok(());
     }
     if n == 1 {
-        iperm[vtx_map[0] as usize] = offset as i32;
+        iperm[vtx_map[0] as usize] = offset as Idx;
         return Ok(());
     }
 
@@ -78,8 +79,8 @@ fn recurse(
     if ncc > 1 {
         let mut off = offset;
         for c in 0..ncc {
-            let (sub, map) = extract_by_label(subgraph, &cc_label, c as i32);
-            let map_to_orig: Vec<i32> = map.iter().map(|&local| vtx_map[local as usize]).collect();
+            let (sub, map) = extract_by_label(subgraph, &cc_label, c as Idx);
+            let map_to_orig: Vec<Idx> = map.iter().map(|&local| vtx_map[local as usize]).collect();
             let count = sub.nvtxs as usize;
             recurse(&sub, &map_to_orig, off, iperm, opts, rng, stats)?;
             off += count;
@@ -96,14 +97,14 @@ fn recurse(
     // Multilevel node bisection.
     let labels = multilevel_node_bisection(subgraph, opts, rng, stats);
 
-    let mut a_verts: Vec<i32> = Vec::new();
-    let mut b_verts: Vec<i32> = Vec::new();
-    let mut s_verts: Vec<i32> = Vec::new();
+    let mut a_verts: Vec<Idx> = Vec::new();
+    let mut b_verts: Vec<Idx> = Vec::new();
+    let mut s_verts: Vec<Idx> = Vec::new();
     for (v, &l) in labels.iter().enumerate() {
         match l {
-            PART_A => a_verts.push(v as i32),
-            PART_B => b_verts.push(v as i32),
-            _ => s_verts.push(v as i32),
+            PART_A => a_verts.push(v as Idx),
+            PART_B => b_verts.push(v as Idx),
+            _ => s_verts.push(v as Idx),
         }
     }
 
@@ -120,17 +121,17 @@ fn recurse(
     // Number separator last: positions [offset + na + nb, offset + n).
     for (i, &v) in s_verts.iter().enumerate() {
         let orig = vtx_map[v as usize];
-        iperm[orig as usize] = (offset + na + nb + i) as i32;
+        iperm[orig as usize] = (offset + na + nb + i) as Idx;
     }
 
     // Recurse on A-side then B-side.
     let (sub_a, map_a_local) = extract_by_list(subgraph, &a_verts);
-    let map_a: Vec<i32> = map_a_local
+    let map_a: Vec<Idx> = map_a_local
         .iter()
         .map(|&local| vtx_map[local as usize])
         .collect();
     let (sub_b, map_b_local) = extract_by_list(subgraph, &b_verts);
-    let map_b: Vec<i32> = map_b_local
+    let map_b: Vec<Idx> = map_b_local
         .iter()
         .map(|&local| vtx_map[local as usize])
         .collect();
@@ -160,12 +161,12 @@ fn multilevel_node_bisection(
         Some(cg) => &cg.graph,
         None => graph,
     };
-    let total: i64 = coarsest.vwgt.iter().map(|&w| w as i64).sum();
+    let total: i64 = coarsest.vwgt.iter().copied().sum();
     let target = total / 2;
 
     // niparts trials; keep best post-FM cut.
     let mut best_labels: Vec<u8> = vec![PART_A; coarsest.nvtxs as usize];
-    let mut best_cut: i32 = i32::MAX;
+    let mut best_cut: Idx = Idx::MAX;
     for trial in 0..opts.niparts {
         let mut trial_labels = if trial % 2 == 0 {
             initial_bisect_ggp(coarsest, rng, target)
@@ -247,9 +248,9 @@ fn multilevel_node_bisection(
 /// `[offset, offset + n)` into `iperm`.
 fn amd_leaf(
     subgraph: &Graph,
-    vtx_map: &[i32],
+    vtx_map: &[Idx],
     offset: usize,
-    iperm: &mut [i32],
+    iperm: &mut [Idx],
     stats: &mut MetisStats,
 ) -> Result<(), OrderingError> {
     stats.n_amd_leaf_calls += 1;
@@ -263,7 +264,7 @@ fn amd_leaf(
     debug_assert_eq!(perm_local.len(), n);
     for (new_pos, &local_id) in perm_local.iter().enumerate() {
         let orig = vtx_map[local_id as usize];
-        iperm[orig as usize] = (offset + new_pos) as i32;
+        iperm[orig as usize] = (offset + new_pos) as Idx;
     }
     Ok(())
 }
@@ -272,10 +273,10 @@ fn amd_leaf(
 /// Adjacency in `Graph` is already full-symmetric with diagonal
 /// dropped; we reinsert the diagonal for downstream consumers that
 /// expect it. Row indices within each column remain sorted.
-fn graph_to_csc_pattern(graph: &Graph) -> (Vec<i32>, Vec<i32>) {
+fn graph_to_csc_pattern(graph: &Graph) -> (Vec<Idx>, Vec<Idx>) {
     let n = graph.nvtxs as usize;
-    let mut col_ptr: Vec<i32> = Vec::with_capacity(n + 1);
-    let mut row_idx: Vec<i32> = Vec::with_capacity(graph.adjncy.len() + n);
+    let mut col_ptr: Vec<Idx> = Vec::with_capacity(n + 1);
+    let mut row_idx: Vec<Idx> = Vec::with_capacity(graph.adjncy.len() + n);
     col_ptr.push(0);
     for v in 0..n {
         let lo = graph.xadj[v] as usize;
@@ -286,15 +287,15 @@ fn graph_to_csc_pattern(graph: &Graph) -> (Vec<i32>, Vec<i32>) {
         for k in lo..hi {
             let u = graph.adjncy[k];
             if !diag_inserted && u as usize > v {
-                row_idx.push(v as i32);
+                row_idx.push(v as Idx);
                 diag_inserted = true;
             }
             row_idx.push(u);
         }
         if !diag_inserted {
-            row_idx.push(v as i32);
+            row_idx.push(v as Idx);
         }
-        col_ptr.push(row_idx.len() as i32);
+        col_ptr.push(row_idx.len() as Idx);
     }
     (col_ptr, row_idx)
 }
@@ -305,8 +306,8 @@ fn graph_to_csc_pattern(graph: &Graph) -> (Vec<i32>, Vec<i32>) {
 /// Rejects an out-of-range or duplicated target position rather than
 /// silently emitting a non-bijection — parity with the scotch/kahip
 /// `invert_iperm` helpers (O20).
-fn invert_iperm(iperm: &[i32], n: usize) -> Result<Vec<i32>, OrderingError> {
-    let mut perm: Vec<i32> = vec![-1; n];
+fn invert_iperm(iperm: &[Idx], n: usize) -> Result<Vec<Idx>, OrderingError> {
+    let mut perm: Vec<Idx> = vec![-1; n];
     for (old, &new_pos) in iperm.iter().enumerate() {
         if new_pos < 0 || (new_pos as usize) >= n {
             return Err(OrderingError::Internal(
@@ -319,25 +320,25 @@ fn invert_iperm(iperm: &[i32], n: usize) -> Result<Vec<i32>, OrderingError> {
                 "metis nd produced duplicate position",
             ));
         }
-        perm[np] = old as i32;
+        perm[np] = old as Idx;
     }
     Ok(perm)
 }
 
 /// Connected-component labeling via BFS. Returns `(cc_label, ncc)`
 /// where `cc_label[v] ∈ 0..ncc`.
-fn connected_components(graph: &Graph) -> (Vec<i32>, usize) {
+fn connected_components(graph: &Graph) -> (Vec<Idx>, usize) {
     let n = graph.nvtxs as usize;
-    let mut cc: Vec<i32> = vec![-1; n];
-    let mut ncc: i32 = 0;
-    let mut queue: Vec<i32> = Vec::new();
+    let mut cc: Vec<Idx> = vec![-1; n];
+    let mut ncc: Idx = 0;
+    let mut queue: Vec<Idx> = Vec::new();
     for start in 0..n {
         if cc[start] >= 0 {
             continue;
         }
         cc[start] = ncc;
         queue.clear();
-        queue.push(start as i32);
+        queue.push(start as Idx);
         while let Some(v) = queue.pop() {
             let vu = v as usize;
             let lo = graph.xadj[vu] as usize;
@@ -357,36 +358,36 @@ fn connected_components(graph: &Graph) -> (Vec<i32>, usize) {
 
 /// Extract the induced subgraph on the vertex set `{v : label[v] == c}`.
 /// Returns the subgraph and the mapping `local_id → original_id`.
-fn extract_by_label(graph: &Graph, label: &[i32], c: i32) -> (Graph, Vec<i32>) {
+fn extract_by_label(graph: &Graph, label: &[Idx], c: Idx) -> (Graph, Vec<Idx>) {
     let n = graph.nvtxs as usize;
-    let mut vtx_map: Vec<i32> = Vec::new();
-    let mut local_id: Vec<i32> = vec![-1; n];
+    let mut vtx_map: Vec<Idx> = Vec::new();
+    let mut local_id: Vec<Idx> = vec![-1; n];
     for v in 0..n {
         if label[v] == c {
-            local_id[v] = vtx_map.len() as i32;
-            vtx_map.push(v as i32);
+            local_id[v] = vtx_map.len() as Idx;
+            vtx_map.push(v as Idx);
         }
     }
     (build_induced(graph, &vtx_map, &local_id), vtx_map)
 }
 
 /// Extract the induced subgraph on the given list of vertex ids.
-fn extract_by_list(graph: &Graph, verts: &[i32]) -> (Graph, Vec<i32>) {
+fn extract_by_list(graph: &Graph, verts: &[Idx]) -> (Graph, Vec<Idx>) {
     let n = graph.nvtxs as usize;
-    let mut local_id: Vec<i32> = vec![-1; n];
+    let mut local_id: Vec<Idx> = vec![-1; n];
     for (i, &v) in verts.iter().enumerate() {
-        local_id[v as usize] = i as i32;
+        local_id[v as usize] = i as Idx;
     }
     let vtx_map = verts.to_vec();
     (build_induced(graph, &vtx_map, &local_id), vtx_map)
 }
 
-fn build_induced(graph: &Graph, vtx_map: &[i32], local_id: &[i32]) -> Graph {
+fn build_induced(graph: &Graph, vtx_map: &[Idx], local_id: &[Idx]) -> Graph {
     let sub_n = vtx_map.len();
-    let mut xadj: Vec<i32> = Vec::with_capacity(sub_n + 1);
-    let mut adjncy: Vec<i32> = Vec::new();
-    let mut adjwgt: Vec<i32> = Vec::new();
-    let mut vwgt: Vec<i32> = Vec::with_capacity(sub_n);
+    let mut xadj: Vec<Idx> = Vec::with_capacity(sub_n + 1);
+    let mut adjncy: Vec<Idx> = Vec::new();
+    let mut adjwgt: Vec<Idx> = Vec::new();
+    let mut vwgt: Vec<Idx> = Vec::with_capacity(sub_n);
     xadj.push(0);
     for &orig in vtx_map {
         let v = orig as usize;
@@ -401,10 +402,10 @@ fn build_induced(graph: &Graph, vtx_map: &[i32], local_id: &[i32]) -> Graph {
                 adjwgt.push(graph.adjwgt[k]);
             }
         }
-        xadj.push(adjncy.len() as i32);
+        xadj.push(adjncy.len() as Idx);
     }
     Graph {
-        nvtxs: sub_n as i32,
+        nvtxs: sub_n as Idx,
         xadj,
         adjncy,
         vwgt,
@@ -418,26 +419,26 @@ mod tests {
     use feral_ordering_core::CscPattern;
     use std::collections::BTreeSet;
 
-    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<i32>, Vec<i32>) {
+    fn csc_from_triples(n: usize, triples: &[(usize, usize)]) -> (Vec<Idx>, Vec<Idx>) {
         let mut set: BTreeSet<(usize, usize)> = BTreeSet::new();
         for &(i, j) in triples {
             set.insert((i, j));
             set.insert((j, i));
         }
-        let mut cols: Vec<Vec<i32>> = vec![Vec::new(); n];
+        let mut cols: Vec<Vec<Idx>> = vec![Vec::new(); n];
         for &(r, c) in &set {
-            cols[c].push(r as i32);
+            cols[c].push(r as Idx);
         }
         for col in &mut cols {
             col.sort();
         }
-        let mut col_ptr: Vec<i32> = vec![0];
-        let mut row_idx: Vec<i32> = Vec::new();
+        let mut col_ptr: Vec<Idx> = vec![0];
+        let mut row_idx: Vec<Idx> = Vec::new();
         for col in &cols {
             for &r in col {
                 row_idx.push(r);
             }
-            col_ptr.push(row_idx.len() as i32);
+            col_ptr.push(row_idx.len() as Idx);
         }
         (col_ptr, row_idx)
     }
@@ -460,7 +461,7 @@ mod tests {
         t
     }
 
-    fn assert_permutation(perm: &[i32]) {
+    fn assert_permutation(perm: &[Idx]) {
         let n = perm.len();
         let mut seen = vec![false; n];
         for &p in perm {
