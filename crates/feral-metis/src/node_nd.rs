@@ -40,7 +40,7 @@ pub(crate) fn nd_order(
     stats.n_components = ncc as u32;
     let identity: Vec<Idx> = (0..n as Idx).collect();
     split_and_recurse(
-        &graph, &identity, &cc_label, ncc, 0, &mut iperm, opts, &mut rng, stats,
+        graph, identity, &cc_label, ncc, 0, &mut iperm, opts, &mut rng, stats,
     )?;
     invert_iperm(&iperm, n)
 }
@@ -49,11 +49,12 @@ pub(crate) fn nd_order(
 /// `label`) one after the other, in label order, into
 /// `[offset, offset + n)`. Linear in the size of `graph`: one counting
 /// sort groups the components, and a single-vertex component takes its
-/// position directly.
+/// position directly. `graph` is consumed so that only the pieces stay
+/// alive while they are being ordered.
 #[allow(clippy::too_many_arguments)]
 fn split_and_recurse(
-    graph: &Graph,
-    vtx_map: &[Idx],
+    graph: Graph,
+    vtx_map: Vec<Idx>,
     label: &[Idx],
     ncc: usize,
     offset: usize,
@@ -81,26 +82,49 @@ fn split_and_recurse(
         fill[c] += 1;
     }
     drop(fill);
-    let mut off = offset;
+    let mut pieces: Vec<(Graph, Vec<Idx>)> = Vec::with_capacity(ncc);
+    let mut singles: Vec<(usize, Idx)> = Vec::new();
     for c in 0..ncc {
         let m = &members[start[c]..start[c + 1]];
         if m.len() == 1 {
-            iperm[vtx_map[m[0] as usize] as usize] = off as Idx;
-            off += 1;
+            singles.push((pieces.len() + singles.len(), vtx_map[m[0] as usize]));
             continue;
         }
-        let sub = build_induced(graph, m, &local_id);
+        let sub = build_induced(&graph, m, &local_id);
         let map: Vec<Idx> = m.iter().map(|&v| vtx_map[v as usize]).collect();
-        recurse(&sub, &map, off, iperm, opts, rng, stats)?;
-        off += m.len();
+        pieces.push((sub, map));
+    }
+    drop((graph, vtx_map, members, local_id));
+    // Re-interleave singletons in component order.
+    let mut off = offset;
+    let mut si = singles.into_iter().peekable();
+    let mut k = 0usize;
+    for (sub, map) in pieces {
+        while let Some(&(pos, orig)) = si.peek() {
+            if pos != k {
+                break;
+            }
+            iperm[orig as usize] = off as Idx;
+            off += 1;
+            k += 1;
+            si.next();
+        }
+        let count = sub.nvtxs as usize;
+        recurse(sub, map, off, iperm, opts, rng, stats)?;
+        off += count;
+        k += 1;
+    }
+    for (_, orig) in si {
+        iperm[orig as usize] = off as Idx;
+        off += 1;
     }
     debug_assert_eq!(off, offset + n);
     Ok(())
 }
 
 fn recurse(
-    subgraph: &Graph,
-    vtx_map: &[Idx],
+    subgraph: Graph,
+    vtx_map: Vec<Idx>,
     offset: usize,
     iperm: &mut [Idx],
     opts: &MetisOptions,
@@ -116,21 +140,20 @@ fn recurse(
         return Ok(());
     }
 
-    let (cc_label, ncc) = connected_components(subgraph);
+    let (cc_label, ncc) = connected_components(&subgraph);
     if ncc > 1 {
         return split_and_recurse(
             subgraph, vtx_map, &cc_label, ncc, offset, iperm, opts, rng, stats,
         );
     }
+    drop(cc_label);
 
-    // AMD leaf.
     if n <= opts.nd_to_amd_switch as usize {
-        amd_leaf(subgraph, vtx_map, offset, iperm, stats)?;
+        amd_leaf(&subgraph, &vtx_map, offset, iperm, stats)?;
         return Ok(());
     }
 
-    // Multilevel node bisection.
-    let labels = multilevel_node_bisection(subgraph, opts, rng, stats);
+    let labels = multilevel_node_bisection(&subgraph, opts, rng, stats);
 
     let mut a_verts: Vec<Idx> = Vec::new();
     let mut b_verts: Vec<Idx> = Vec::new();
@@ -142,37 +165,41 @@ fn recurse(
             _ => s_verts.push(v as Idx),
         }
     }
+    drop(labels);
 
-    // Safety: if one side is empty (degenerate), fall back to AMD.
     if a_verts.is_empty() || b_verts.is_empty() {
-        amd_leaf(subgraph, vtx_map, offset, iperm, stats)?;
+        amd_leaf(&subgraph, &vtx_map, offset, iperm, stats)?;
         return Ok(());
     }
 
     stats.n_separator_vertices += s_verts.len() as u32;
     let na = a_verts.len();
     let nb = b_verts.len();
-
-    // Number separator last: positions [offset + na + nb, offset + n).
     for (i, &v) in s_verts.iter().enumerate() {
         let orig = vtx_map[v as usize];
         iperm[orig as usize] = (offset + na + nb + i) as Idx;
     }
+    drop(s_verts);
 
-    // Recurse on A-side then B-side.
-    let (sub_a, map_a_local) = extract_by_list(subgraph, &a_verts);
-    let map_a: Vec<Idx> = map_a_local
-        .iter()
-        .map(|&local| vtx_map[local as usize])
-        .collect();
-    let (sub_b, map_b_local) = extract_by_list(subgraph, &b_verts);
-    let map_b: Vec<Idx> = map_b_local
-        .iter()
-        .map(|&local| vtx_map[local as usize])
-        .collect();
+    // One local-id array serves both sides (their ids never mix).
+    let mut local_id: Vec<Idx> = vec![-1; n];
+    for (i, &v) in a_verts.iter().enumerate() {
+        local_id[v as usize] = i as Idx;
+    }
+    let sub_a = build_induced(&subgraph, &a_verts, &local_id);
+    for &v in &a_verts {
+        local_id[v as usize] = -1;
+    }
+    for (i, &v) in b_verts.iter().enumerate() {
+        local_id[v as usize] = i as Idx;
+    }
+    let sub_b = build_induced(&subgraph, &b_verts, &local_id);
+    let map_a: Vec<Idx> = a_verts.iter().map(|&l| vtx_map[l as usize]).collect();
+    let map_b: Vec<Idx> = b_verts.iter().map(|&l| vtx_map[l as usize]).collect();
+    drop((subgraph, vtx_map, local_id, a_verts, b_verts));
 
-    recurse(&sub_a, &map_a, offset, iperm, opts, rng, stats)?;
-    recurse(&sub_b, &map_b, offset + na, iperm, opts, rng, stats)?;
+    recurse(sub_a, map_a, offset, iperm, opts, rng, stats)?;
+    recurse(sub_b, map_b, offset + na, iperm, opts, rng, stats)?;
     Ok(())
 }
 
@@ -391,17 +418,6 @@ fn connected_components(graph: &Graph) -> (Vec<Idx>, usize) {
     (cc, ncc as usize)
 }
 
-/// Extract the induced subgraph on the given list of vertex ids.
-fn extract_by_list(graph: &Graph, verts: &[Idx]) -> (Graph, Vec<Idx>) {
-    let n = graph.nvtxs as usize;
-    let mut local_id: Vec<Idx> = vec![-1; n];
-    for (i, &v) in verts.iter().enumerate() {
-        local_id[v as usize] = i as Idx;
-    }
-    let vtx_map = verts.to_vec();
-    (build_induced(graph, &vtx_map, &local_id), vtx_map)
-}
-
 fn build_induced(graph: &Graph, vtx_map: &[Idx], local_id: &[Idx]) -> Graph {
     let sub_n = vtx_map.len();
     let mut xadj: Vec<Idx> = Vec::with_capacity(sub_n + 1);
@@ -597,9 +613,9 @@ mod tests {
         let (cp, ri) = csc_from_triples(9, &t);
         let pat = CscPattern::new(9, &cp, &ri).unwrap();
         let g = Graph::from_csc_pattern(&pat).unwrap();
-        let (sub, map) = extract_by_list(&g, &[0, 1, 2]);
+        let local_id: Vec<Idx> = vec![0, 1, 2, -1, -1, -1, -1, -1, -1];
+        let sub = build_induced(&g, &[0, 1, 2], &local_id);
         assert_eq!(sub.nvtxs, 3);
-        assert_eq!(map, vec![0, 1, 2]);
         // Top row: 0-1, 1-2 → 2 edges, each stored twice.
         assert_eq!(sub.adjncy.len(), 4);
     }
